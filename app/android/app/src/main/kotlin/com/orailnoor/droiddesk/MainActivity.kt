@@ -561,6 +561,12 @@ class MainActivity : FlutterActivity() {
 
                 // ── Start Linux session ──
                 "startLinux" -> {
+                    runCatching {
+                        com.orailnoor.droiddesk.runtime.SdcardBridge.setup(
+                            this,
+                            java.io.File(filesDir, "home"),
+                        )
+                    }.onFailure { android.util.Log.w("MainActivity", "SdcardBridge", it) }
                     val desktopEnv = call.argument<String>("de") ?: "xfce4"
                     val mode = call.argument<String>("mode") ?: "x11"
                     var width = call.argument<Int>("width") ?: 1920

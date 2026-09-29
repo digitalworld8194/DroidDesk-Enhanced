@@ -364,6 +364,8 @@ object AndroidAppBridge {
             listOf(defaultMessages, "com.google.android.apps.messaging", "com.android.messaging", "com.samsung.android.messaging"),
             listOf("com.whatsapp", "com.whatsapp.w4b"),
             listOf("com.android.chrome"),
+            listOf("com.sec.android.app.camera", "com.android.camera2", "com.google.android.GoogleCamera"),
+            listOf("com.sec.android.app.launcher", "com.android.launcher3"),
         ).mapNotNull { choices ->
             choices.filterNotNull().firstOrNull { it in installed }
         }.distinct()
