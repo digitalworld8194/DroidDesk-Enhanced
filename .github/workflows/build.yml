@@ -35,7 +35,8 @@ jobs:
 
       - name: Write local.properties
         run: |
-          printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_ROOT" "$ANDROID_HOME" \
+          FLUTTER_SDK="$(dirname "$(dirname "$(command -v flutter)")")"
+          printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK" "$ANDROID_HOME" \
             > app/android/local.properties
           cat app/android/local.properties
 

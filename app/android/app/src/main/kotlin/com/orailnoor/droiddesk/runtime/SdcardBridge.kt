@@ -8,10 +8,9 @@ import java.io.File
 /**
  * Exposes shared Android storage (/sdcard) inside the Linux home so files
  * taken with the Android camera, downloaded by the browser, or saved by
- * any Android app are immediately visible in Thunar, GIMP, editors, etc.
+ * any Android app are immediately visible to Linux apps.
  *
- * Uses symlinks instead of bind mounts so it works without root. Every
- * Linux tool we care about follows symlinks transparently.
+ * Uses symlinks instead of bind mounts so it works without root.
  */
 object SdcardBridge {
     private const val TAG = "SdcardBridge"
@@ -51,15 +50,6 @@ object SdcardBridge {
             else    { Log.w(TAG, "failed ${e.linkName} -> $source") }
         }
         Log.i(TAG, "SdcardBridge: $created new, $skipped skipped")
-    }
-
-    /** Remove broken links (e.g. after storage move) then re-create. */
-    fun refresh(context: Context, linuxHome: File) {
-        for (e in entries) {
-            val link = File(linuxHome, e.linkName)
-            if (isSymlink(link) && !link.exists()) link.delete()
-        }
-        setup(context, linuxHome)
     }
 
     private fun isSymlink(file: File): Boolean = runCatching {
