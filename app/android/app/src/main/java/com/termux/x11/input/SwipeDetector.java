@@ -100,27 +100,9 @@ public class SwipeDetector {
         float deltaX1 = currentX1 - mFirstX1;
         float deltaY1 = currentY1 - mFirstY1;
 
-        float squaredDistance0 = deltaX0 * deltaX0 + deltaY0 * deltaY0;
-        float squaredDistance1 = deltaX1 * deltaX1 + deltaY1 * deltaY1;
-
-        // If both fingers have moved beyond the touch-slop, it is safe to recognize the gesture.
-        // However, one finger might be held stationary whilst the other finger is moved a long
-        // distance. In this case, it is preferable to trigger a PINCH. This should be detected
-        // soon enough to avoid triggering a sudden large change in the zoom level, but not so
-        // soon that SWIPE never gets triggered.
-
-        boolean finger0Moved = squaredDistance0 > mTouchSlopSquare;
-        boolean finger1Moved = squaredDistance1 > mTouchSlopSquare;
-
-        if ((!finger0Moved && !finger1Moved) || (finger0Moved && !finger1Moved) || (!finger0Moved && finger1Moved))
-            return;
-
-        // Both fingers have moved, so determine SWIPE/PINCH status. If the fingers have moved in
-        // the same direction, this is a SWIPE, otherwise it's a PINCH. This can be measured by
-        // taking the scalar product of the direction vectors. This product is positive if the
-        // vectors are pointing in the same direction, and negative if they're in opposite
-        // directions.
-        float scalarProduct = deltaX0 * deltaX1 + deltaY0 * deltaY1;
-        mInSwipe = scalarProduct > 0;
+        int gesture = TrackpadGestures.classifyTwoFingerGesture(
+                deltaX0, deltaY0, deltaX1, deltaY1, mTouchSlopSquare);
+        if (gesture != TrackpadGestures.GESTURE_UNKNOWN)
+            mInSwipe = gesture == TrackpadGestures.GESTURE_SWIPE;
     }
 }

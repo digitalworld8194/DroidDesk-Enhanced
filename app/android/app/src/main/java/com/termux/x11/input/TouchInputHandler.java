@@ -19,6 +19,7 @@ import android.hardware.display.DisplayManager;
 import android.hardware.input.InputManager;
 import android.os.Handler;
 import android.os.Build;
+import android.os.SystemClock;
 import android.util.DisplayMetrics;
 import android.view.Display;
 import android.view.GestureDetector;
@@ -88,6 +89,12 @@ public class TouchInputHandler {
 
     /** Used to disambiguate a 2-finger gesture as a swipe or a pinch. */
     private final SwipeDetector mSwipePinchDetector;
+
+    /** Laptop-style tap-and-drag, two-finger scroll axis lock and touch-mode double tap. */
+    private final TrackpadGestures.TapDrag mTapDrag;
+    private final TrackpadGestures.ScrollAxisLock mScrollAxisLock;
+    private final TrackpadGestures.DoubleTapAnchor mDoubleTapAnchor;
+    private final float[] mScrollDelta = new float[2];
 
     private InputStrategyInterface mInputStrategy;
     private final InputEventSender mInjector;
@@ -202,6 +209,13 @@ public class TouchInputHandler {
         float density = /*desktop*/ activity.getResources().getDisplayMetrics().density;
         mSwipeThreshold = 40 * density;
 
+        ViewConfiguration viewConfig = ViewConfiguration.get(/*desktop*/ activity);
+        int touchSlop = viewConfig.getScaledTouchSlop();
+        mTapDrag = new TrackpadGestures.TapDrag(ViewConfiguration.getDoubleTapTimeout(), touchSlop);
+        mScrollAxisLock = new TrackpadGestures.ScrollAxisLock(touchSlop / 2f);
+        mDoubleTapAnchor = new TrackpadGestures.DoubleTapAnchor(ViewConfiguration.getDoubleTapTimeout(),
+                viewConfig.getScaledDoubleTapSlop() * 0.25f);
+
 //        mEdgeSlopInPx = ViewConfiguration.get(/*desktop*/ ctx).getScaledEdgeSlop();
 
         setInputMode(InputMode.TRACKPAD);
@@ -273,10 +287,7 @@ public class TouchInputHandler {
         // multi-finger taps work, instead of the hardware-mouse path which only
         // forwards physical button state. Real mice use TOOL_TYPE_MOUSE and real
         // touchpads report SOURCE_TOUCHPAD, so neither is affected.
-        int SOURCE_DEX = InputDevice.SOURCE_MOUSE;
-        return ((event.getSource() & SOURCE_DEX) == SOURCE_DEX)
-                && ((event.getSource() & InputDevice.SOURCE_TOUCHPAD) != InputDevice.SOURCE_TOUCHPAD)
-                && (event.getToolType(event.getActionIndex()) == MotionEvent.TOOL_TYPE_FINGER);
+        return TrackpadGestures.isDexLike(event.getSource(), event.getToolType(event.getActionIndex()));
     }
 
     public boolean handleTouchEvent(View view0, View view, MotionEvent event) {
@@ -288,8 +299,9 @@ public class TouchInputHandler {
 
         // Regular touchpads and Dex touchpad (in captured mode) send events as finger too,
         // but they should be handled as touchscreens with trackpad mode.
-        if (mTouchpadHandler != null && ((event.getToolType(event.getActionIndex()) == MotionEvent.TOOL_TYPE_FINGER &&
-                (event.getSource() & InputDevice.SOURCE_TOUCHPAD) == InputDevice.SOURCE_TOUCHPAD) || isDexEvent(event)))
+        int source = event.getSource();
+        int toolType = event.getToolType(event.getActionIndex());
+        if (mTouchpadHandler != null && (TrackpadGestures.isTouchpadFinger(source, toolType) || isDexEvent(event)))
             return mTouchpadHandler.handleTouchEvent(view0, view, event);
 
         if (view0 != view) {
@@ -315,9 +327,8 @@ public class TouchInputHandler {
                 || event.getToolType(event.getActionIndex()) == MotionEvent.TOOL_TYPE_ERASER)
             return mStylusListener.onTouch(event);
 
-        if (!isDexEvent(event) && (event.getToolType(event.getActionIndex()) == MotionEvent.TOOL_TYPE_MOUSE
-                || (event.getSource() & InputDevice.SOURCE_MOUSE) == InputDevice.SOURCE_MOUSE)
-                || (event.getSource() & InputDevice.SOURCE_MOUSE_RELATIVE) == InputDevice.SOURCE_MOUSE_RELATIVE)
+        // Physical USB/Bluetooth mice keep their own path in every touch mode.
+        if (TrackpadGestures.isHardwareMouse(source, toolType))
             return mHMListener.onTouch(view, event);
 
         if (event.getToolType(event.getActionIndex()) == MotionEvent.TOOL_TYPE_FINGER) {
@@ -332,6 +343,14 @@ public class TouchInputHandler {
                 mInjector.sendTouchEvent(event, mRenderData);
             else
                 mInputStrategy.onMotionEvent(event);
+
+            // Tap-and-drag: press before the detectors move the cursor, so the drag starts exactly
+            // where the preceding tap clicked.
+            if (event.getActionMasked() == MotionEvent.ACTION_MOVE && event.getPointerCount() == 1
+                    && !mIsDragging && mInputStrategy instanceof InputStrategyInterface.TrackpadInputStrategy
+                    && mTapDrag.onMove(event.getX(), event.getY())
+                    && mInputStrategy.onPressAndHold(InputStub.BUTTON_LEFT, true))
+                mIsDragging = true;
 
             // Avoid short-circuit logic evaluation - ensure all gesture detectors see all events so
             // that they generate correct notifications.
@@ -352,6 +371,13 @@ public class TouchInputHandler {
                     mSuppressCursorMovement = false;
                     mSwipeCompleted = false;
                     mIsDragging = false;
+                    mTapDrag.onDown(event.getEventTime(), event.getX(), event.getY());
+                    mScrollAxisLock.reset();
+                    break;
+
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    mTapDrag.cancel();
                     break;
 
                 case MotionEvent.ACTION_SCROLL:
@@ -363,6 +389,8 @@ public class TouchInputHandler {
 
                 case MotionEvent.ACTION_POINTER_DOWN:
                     mTotalMotionY = 0;
+                    mTapDrag.cancel();
+                    mScrollAxisLock.reset();
                     break;
 
                 default:
@@ -640,7 +668,9 @@ public class TouchInputHandler {
                     // otherwise the target window may not receive the scroll event correctly.
                     moveCursorToScreenPoint(e1.getX(), e1.getY());
                 }
-                mInputStrategy.onScroll(distanceX, distanceY);
+                mScrollAxisLock.filter(distanceX, distanceY, mScrollDelta);
+                if (mScrollDelta[0] != 0 || mScrollDelta[1] != 0)
+                    mInputStrategy.onScroll(mScrollDelta[0], mScrollDelta[1]);
 
                 // Prevent the cursor being moved or flung by the gesture.
                 mSuppressCursorMovement = true;
@@ -684,12 +714,21 @@ public class TouchInputHandler {
                 if (screenPointLiesOutsideImageBoundary(x, y))
                     return;
 
-                moveCursorToScreenPoint(x, y);
+                // Keep the first tap's position for the second tap of a double tap, otherwise
+                // finger jitter can turn a double click into two separate clicks.
+                boolean secondTap = button == InputStub.BUTTON_LEFT
+                        && mDoubleTapAnchor.isSecondTap(SystemClock.uptimeMillis(), x, y);
+                if (button != InputStub.BUTTON_LEFT)
+                    mDoubleTapAnchor.reset();
+                if (!secondTap)
+                    moveCursorToScreenPoint(x, y);
             }
 
-            if (button != InputStub.BUTTON_LEFT || !(mInjector.tapToMove && mInputStrategy instanceof InputStrategyInterface.TrackpadInputStrategy))
+            if (button != InputStub.BUTTON_LEFT || !(mInjector.tapToMove && mInputStrategy instanceof InputStrategyInterface.TrackpadInputStrategy)) {
                 mInputStrategy.onTap(button);
-            else
+                if (button == InputStub.BUTTON_LEFT && mInputStrategy instanceof InputStrategyInterface.TrackpadInputStrategy)
+                    mTapDrag.onTap(SystemClock.uptimeMillis());
+            } else
                 mGestureListenerHandler.sendEmptyMessageDelayed(InputStub.BUTTON_LEFT, ViewConfiguration.getDoubleTapTimeout());
         }
 
@@ -738,16 +777,7 @@ public class TouchInputHandler {
 
         /** Maps the number of fingers in a tap or long-press gesture to a mouse-button. */
         private int mouseButtonFromPointerCount(int pointerCount) {
-            switch (pointerCount) {
-                case 1:
-                    return InputStub.BUTTON_LEFT;
-                case 2:
-                    return InputStub.BUTTON_RIGHT;
-                case 3:
-                    return InputStub.BUTTON_MIDDLE;
-                default:
-                    return InputStub.BUTTON_UNDEFINED;
-            }
+            return TrackpadGestures.mouseButtonForFingers(pointerCount);
         }
 
         /** Determines whether the given screen point lies outside the desktop image. */
