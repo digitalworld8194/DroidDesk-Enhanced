@@ -453,6 +453,14 @@ public class TouchInputHandler {
             mInputStrategy = new InputStrategyInterface.TrackpadInputStrategy(mInjector);
     }
 
+    /**
+     * Applies a Trackpad-mode sensitivity immediately (live slider). Only the touchscreen pointer
+     * ballistics change; mode, strategy and every other input path are left untouched.
+     */
+    public void setTrackpadSensitivity(int percent) {
+        mPointerAccel.setSensitivity(PointerAcceleration.sensitivityFromPercent(percent));
+    }
+
     /** Releases any button held by a drag (mode switch, view teardown). Safe to call anytime. */
     public void releaseButtons() {
         if (mInputStrategy != null)

@@ -7,8 +7,8 @@ import com.termux.x11.LorieView
 import com.termux.x11.MainActivity
 import com.termux.x11.input.InputEventSender
 import com.termux.x11.input.InputModes
-import com.termux.x11.input.PointerAcceleration
 import com.termux.x11.input.TouchInputHandler
+import com.termux.x11.input.TrackpadSensitivity
 
 /** Connects LorieView to the gesture/input implementation imported from Termux:X11. */
 class X11InputController(private val lorieView: LorieView) {
@@ -24,11 +24,19 @@ class X11InputController(private val lorieView: LorieView) {
     var mode: Int = InputModes.fromStored(modePrefs.getString(KEY_TOUCH_MODE, null))
         private set
 
-    /** Trackpad-mode pointer sensitivity in percent, persisted like the mode. */
-    var sensitivityPercent: Int = modePrefs.getInt(
-        KEY_TRACKPAD_SENSITIVITY, PointerAcceleration.DEFAULT_SENSITIVITY_PERCENT,
-    ).coerceIn(PointerAcceleration.MIN_SENSITIVITY_PERCENT, PointerAcceleration.MAX_SENSITIVITY_PERCENT)
-        private set
+    /**
+     * Trackpad-mode pointer sensitivity in percent, persisted like the mode. Loaded here, before
+     * init attaches the touch listeners, so the stored value drives the very first cursor move.
+     */
+    private val sensitivity = TrackpadSensitivity(object : TrackpadSensitivity.Store {
+        override fun read(fallback: Int) = modePrefs.getInt(KEY_TRACKPAD_SENSITIVITY, fallback)
+        override fun write(percent: Int) {
+            modePrefs.edit().putInt(KEY_TRACKPAD_SENSITIVITY, percent).apply()
+        }
+    })
+
+    val sensitivityPercent: Int
+        get() = sensitivity.get()
 
     init {
         setMode(mode)
@@ -50,14 +58,22 @@ class X11InputController(private val lorieView: LorieView) {
 
     fun modeLabel(): String = InputModes.label(mode)
 
-    /** Applies a new pointer sensitivity live (clamped to 25..300 %) and persists it. */
-    fun setSensitivity(percent: Int) {
-        sensitivityPercent = percent.coerceIn(
-            PointerAcceleration.MIN_SENSITIVITY_PERCENT, PointerAcceleration.MAX_SENSITIVITY_PERCENT,
-        )
-        modePrefs.edit().putInt(KEY_TRACKPAD_SENSITIVITY, sensitivityPercent).apply()
-        setMode(mode)
+    /** Sensitivity only affects Trackpad mode; Touch mode keeps direct pointing. */
+    val isTrackpadMode: Boolean
+        get() = mode == InputModes.TRACKPAD
+
+    /**
+     * Applies a new pointer sensitivity live (clamped to 25..300 %) and persists it. Only the
+     * trackpad ballistics change: no X, session or mode restart. Returns the value in effect.
+     */
+    fun setSensitivity(percent: Int): Int {
+        val value = sensitivity.set(percent)
+        MainActivity.getPrefs().trackpadSensitivity.put(value)
+        inputHandler.setTrackpadSensitivity(value)
+        return value
     }
+
+    fun resetSensitivity(): Int = setSensitivity(TrackpadSensitivity.DEFAULT)
 
     fun dispose() {
         // Never leave a drag's button pressed in X when the view goes away.

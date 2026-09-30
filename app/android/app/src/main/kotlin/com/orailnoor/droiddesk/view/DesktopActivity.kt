@@ -24,6 +24,7 @@ import android.widget.Toast
 import android.widget.Button
 import android.widget.ImageView
 import android.widget.ProgressBar
+import android.widget.SeekBar
 import android.widget.TextView
 import android.view.Gravity
 import android.content.res.ColorStateList
@@ -34,6 +35,7 @@ import com.orailnoor.droiddesk.runtime.ChrootRuntime
 import com.orailnoor.droiddesk.runtime.ClipboardSync
 import com.orailnoor.droiddesk.x11.X11ServiceClient
 import com.orailnoor.droiddesk.x11.X11InputController
+import com.termux.x11.input.TrackpadSensitivity
 
 class DesktopActivity : Activity() {
     private var lorieView: LorieView? = null
@@ -49,6 +51,8 @@ class DesktopActivity : Activity() {
     private var x11ServiceClient: X11ServiceClient? = null
     private var inputController: X11InputController? = null
     private var inputModeButton: Button? = null
+    private var sensitivityButton: Button? = null
+    private var sensitivityPanel: LinearLayout? = null
     private var controlOverlay: LinearLayout? = null
     private var collapsedControl: Button? = null
     private var surfaceCallback: SurfaceHolder.Callback? = null
@@ -297,16 +301,23 @@ class DesktopActivity : Activity() {
             setOnClickListener {
                 inputController?.nextMode()
                 text = inputController?.modeLabel() ?: "Trackpad"
+                updateSensitivityVisibility()
                 Toast.makeText(this@DesktopActivity, "Input mode: $text", Toast.LENGTH_SHORT).show()
             }
         }
+        sensitivityButton = controlButton(sensitivityButtonLabel()).apply {
+            contentDescription = "Trackpad sensitivity"
+            setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
+            setOnClickListener { toggleSensitivityPanel() }
+        }
+        sensitivityPanel = buildSensitivityPanel(density)
         val hideButton = controlButton("−").apply {
             contentDescription = "Hide desktop controls"
             setOnClickListener { setControlsCollapsed(true) }
             setPadding((9 * density).toInt(), 0, (9 * density).toInt(), 0)
         }
 
-        controlOverlay = LinearLayout(this).apply {
+        val controlRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
             addView(dragHandle, LinearLayout.LayoutParams(
@@ -318,10 +329,31 @@ class DesktopActivity : Activity() {
             addView(inputModeButton, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, (42 * density).toInt(),
             ))
+            addView(sensitivityButton, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, (42 * density).toInt(),
+            ))
             addView(hideButton, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, (42 * density).toInt(),
             ))
         }
+
+        // The sensitivity panel opens below the buttons, so it never covers Keyboard/Trackpad.
+        controlOverlay = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.END
+            addView(controlRow, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT,
+            ))
+            addView(sensitivityPanel, LinearLayout.LayoutParams(
+                sensitivityPanelWidth(density), LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = (6 * density).toInt() })
+            // A dragged overlay that grows (panel opened, rotation) must stay inside the screen.
+            addOnLayoutChangeListener { view, _, _, _, _, _, _, _, _ ->
+                view.x = view.x.coerceIn(0f, (placeholder.width - view.width).coerceAtLeast(0).toFloat())
+                view.y = view.y.coerceIn(0f, (placeholder.height - view.height).coerceAtLeast(0).toFloat())
+            }
+        }
+        updateSensitivityVisibility()
 
         collapsedControl = controlButton("☰").apply {
             contentDescription = "Show desktop controls"
@@ -355,6 +387,105 @@ class DesktopActivity : Activity() {
             setControlsCollapsed(false)
         })
         controlOverlay?.bringToFront()
+    }
+
+    private fun sensitivityButtonLabel(): String =
+        "${inputController?.sensitivityPercent ?: TrackpadSensitivity.DEFAULT}%"
+
+    /** Fits a phone in portrait: at most 300dp, never wider than the screen minus margins. */
+    private fun sensitivityPanelWidth(density: Float): Int =
+        minOf((300 * density).toInt(), resources.displayMetrics.widthPixels - (16 * density).toInt())
+
+    private fun buildSensitivityPanel(density: Float): LinearLayout {
+        val pad = (12 * density).toInt()
+        val title = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 13f
+            text = TrackpadSensitivity.label(inputController?.sensitivityPercent ?: TrackpadSensitivity.DEFAULT)
+        }
+        val slider = SeekBar(this).apply {
+            contentDescription = "Trackpad sensitivity"
+            max = TrackpadSensitivity.stopCount() - 1
+            progress = TrackpadSensitivity.stopIndex(inputController?.sensitivityPercent ?: TrackpadSensitivity.DEFAULT)
+            progressTintList = ColorStateList.valueOf(Color.rgb(96, 165, 250))
+            thumbTintList = ColorStateList.valueOf(Color.WHITE)
+        }
+        val ends = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            addView(TextView(this@DesktopActivity).apply {
+                text = "${TrackpadSensitivity.MIN}%"
+                setTextColor(Color.LTGRAY)
+                textSize = 11f
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            addView(TextView(this@DesktopActivity).apply {
+                text = "${TrackpadSensitivity.MAX}%"
+                setTextColor(Color.LTGRAY)
+                textSize = 11f
+                gravity = Gravity.END
+            }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        fun show(percent: Int) {
+            title.text = TrackpadSensitivity.label(percent)
+            sensitivityButton?.text = "$percent%"
+        }
+        slider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            // Applied and saved on every step, while the thumb moves: no restart of anything.
+            override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                val controller = inputController ?: return
+                show(controller.setSensitivity(TrackpadSensitivity.percentAt(progress)))
+            }
+            override fun onStartTrackingTouch(bar: SeekBar) {}
+            override fun onStopTrackingTouch(bar: SeekBar) {}
+        })
+        val reset = Button(this).apply {
+            isAllCaps = false
+            minWidth = 0
+            minHeight = 0
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            backgroundTintList = ColorStateList.valueOf(Color.argb(255, 45, 60, 80))
+            text = "Reset to ${TrackpadSensitivity.DEFAULT}%"
+            setOnClickListener {
+                val controller = inputController ?: return@setOnClickListener
+                val value = controller.resetSensitivity()
+                slider.progress = TrackpadSensitivity.stopIndex(value)
+                show(value)
+            }
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(pad, pad, pad, pad)
+            background = GradientDrawable().apply {
+                cornerRadius = 12 * density
+                setColor(Color.argb(235, 28, 38, 52))
+            }
+            elevation = 6 * density
+            visibility = View.GONE
+            addView(title)
+            addView(slider, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, (40 * density).toInt(),
+            ))
+            addView(ends)
+            addView(reset, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, (38 * density).toInt(),
+            ).apply {
+                gravity = Gravity.END
+                topMargin = (6 * density).toInt()
+            })
+        }
+    }
+
+    private fun toggleSensitivityPanel() {
+        val panel = sensitivityPanel ?: return
+        panel.visibility = if (panel.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+    }
+
+    /** Sensitivity only makes sense in Trackpad mode: hide the button and panel in Touch mode. */
+    private fun updateSensitivityVisibility() {
+        val trackpad = inputController?.isTrackpadMode ?: true
+        sensitivityButton?.visibility = if (trackpad) View.VISIBLE else View.GONE
+        if (!trackpad) sensitivityPanel?.visibility = View.GONE
     }
 
     private fun dragListener(target: View, onTap: (() -> Unit)? = null): View.OnTouchListener {
@@ -395,6 +526,7 @@ class DesktopActivity : Activity() {
     }
 
     private fun setControlsCollapsed(collapsed: Boolean) {
+        if (collapsed) sensitivityPanel?.visibility = View.GONE
         val from = if (collapsed) controlOverlay else collapsedControl
         val to = if (collapsed) collapsedControl else controlOverlay
         to?.x = from?.x ?: 0f
