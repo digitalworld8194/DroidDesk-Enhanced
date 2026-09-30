@@ -122,6 +122,16 @@ class LinuxRuntime(private val context: Context) {
         return File(baseDir, BOOTSTRAP_MARKER).exists() && File(prefixDir, "bin/bash").exists()
     }
 
+    /**
+     * Resets the install markers so the setup flow re-runs on next launch.
+     * Does NOT delete usr/ — installed packages survive for a fast reinstall.
+     */
+    fun resetInstall() {
+        File(prefixDir, DE_MARKER).delete()
+        File(baseDir, BOOTSTRAP_MARKER).delete()
+        Log.i(TAG, "Cleared DE and bootstrap markers; packages preserved")
+    }
+
     fun isRunning(): Boolean {
         return sessionProcess?.isAlive == true
     }
@@ -1770,6 +1780,23 @@ class LinuxRuntime(private val context: Context) {
                 homeDir = homeDir,
                 python = File(prefixDir, "bin/python3"),
             )
+
+            // Update Firefox and Camera launchers for this session
+            val cameraPackage = listOf(
+                "com.sec.android.app.camera",
+                "com.android.camera2",
+                "com.google.android.GoogleCamera"
+            ).firstOrNull { pkg ->
+                runCatching {
+                    context.packageManager.getPackageInfo(pkg, 0)
+                    true
+                }.getOrDefault(false)
+            }
+            XfceMobileProfile.updateSessionLaunchers(
+                homeDir = homeDir,
+                firefoxBin = File(binDir, "firefox"),
+                cameraPackage = cameraPackage,
+            )
         }
 
         // X11ServerService owns this socket. Never delete it from the client runtime.
@@ -1960,14 +1987,37 @@ class LinuxRuntime(private val context: Context) {
     }
 
     fun stopSession() {
-        Log.i(TAG, "Stopping Linux session...")
-        sessionProcess?.let {
-            it.destroyForcibly()
-            it.waitFor()
+        Log.i(TAG, "Stopping Linux session gracefully...")
+        sessionProcess?.let { proc ->
+            // Ask the desktop session to exit cleanly first
+            try {
+                val bashBin = File(prefixDir, "bin/bash").absolutePath
+                ProcessBuilder(bashBin, "-c",
+                    "pkill -TERM xfce4-session; pkill -TERM mate-session; " +
+                    "pkill -TERM startlxqt; pkill -TERM plasmashell; true"
+                ).also { pb ->
+                    pb.environment().clear()
+                    pb.environment().putAll(getTermuxEnv())
+                }.start().waitFor()
+            } catch (e: Exception) {
+                Log.w(TAG, "Graceful TERM signal failed (non-fatal): ${e.message}")
+            }
+            // Wait up to 3 seconds for clean exit before forcing
+            val exited = proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
+            if (!exited) {
+                Log.i(TAG, "Session did not exit after 3s; forcing kill")
+                proc.destroyForcibly()
+                proc.waitFor()
+            }
         }
         sessionProcess = null
+
         dbusProcess?.destroyForcibly()
         dbusProcess = null
+
+        // Clean up dbus socket file
+        File(tmpDir, "dbus-session").delete()
+
         Log.i(TAG, "Session stopped")
     }
 

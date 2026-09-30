@@ -332,6 +332,20 @@ object AndroidAppBridge {
             "sound" -> Settings.ACTION_SOUND_SETTINGS
             "hotspot" -> "android.settings.TETHER_SETTINGS"
             "battery" -> Settings.ACTION_BATTERY_SAVER_SETTINGS
+            "home_settings" -> Settings.ACTION_HOME_SETTINGS
+            "samsung_home" -> {
+                val launchIntent = context.packageManager
+                    .getLaunchIntentForPackage("com.sec.android.app.launcher")
+                    ?: context.packageManager.getLaunchIntentForPackage("com.android.launcher3")
+                if (launchIntent != null) {
+                    runCatching {
+                        context.startActivity(launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    }.onFailure { Log.w(TAG, "Could not launch Samsung Home", it) }
+                } else {
+                    Log.w(TAG, "No known Samsung/AOSP launcher found")
+                }
+                return
+            }
             else -> Settings.ACTION_SETTINGS
         }
         runCatching {

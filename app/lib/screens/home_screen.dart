@@ -593,6 +593,42 @@ class HomeScreen extends StatelessWidget {
                       );
                     },
                   ),
+                  const Divider(height: 28),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text('Emergency Exit', style: DroidTheme.headingSm.copyWith(color: DroidTheme.error)),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.settings_rounded, color: DroidTheme.textSecondary),
+                    title: const Text('Android Settings'),
+                    subtitle: const Text('Open Android system settings directly'),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      DroidDeskPlatform.openAndroidControl('settings');
+                    },
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.home_work_rounded, color: DroidTheme.textSecondary),
+                    title: const Text('Change Home App'),
+                    subtitle: const Text('Open Android Home app chooser'),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      DroidDeskPlatform.openAndroidControl('home_settings');
+                    },
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(Icons.phone_android_rounded, color: DroidTheme.error),
+                    title: const Text('Return to Samsung Home'),
+                    subtitle: const Text('Launch One UI Home directly'),
+                    onTap: () {
+                      Navigator.pop(sheetContext);
+                      DroidDeskPlatform.openAndroidControl('samsung_home');
+                    },
+                  ),
+                  const Divider(height: 28),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.refresh, color: DroidTheme.secondary),
@@ -600,6 +636,34 @@ class HomeScreen extends StatelessWidget {
                     subtitle: const Text('Re-download and set up rootfs'),
                     onTap: () {
                       Navigator.pop(sheetContext);
+                      showDialog<bool>(
+                        context: pageContext,
+                        builder: (dialogContext) => AlertDialog(
+                          title: const Text('Reinstall Linux Environment?'),
+                          content: const Text(
+                            'This will delete your installed Linux packages and desktop environment, '
+                            'then reinstall from scratch.\n\n'
+                            'Your home folder files will be preserved. This cannot be undone.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(dialogContext, false),
+                              child: const Text('Cancel'),
+                            ),
+                            FilledButton(
+                              style: FilledButton.styleFrom(
+                                backgroundColor: DroidTheme.error,
+                              ),
+                              onPressed: () => Navigator.pop(dialogContext, true),
+                              child: const Text('Reinstall'),
+                            ),
+                          ],
+                        ),
+                      ).then((confirmed) {
+                        if (confirmed == true) {
+                          state.reinstallLinux(pageContext);
+                        }
+                      });
                     },
                   ),
                 ],

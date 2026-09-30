@@ -472,6 +472,26 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  Future<void> reinstallLinux(BuildContext context) async {
+    try {
+      // Stop the session if running
+      if (_isRunning) {
+        await stopLinux();
+      }
+      // Reset installed state via platform bridge
+      await DroidDeskPlatform.resetLinuxInstall();
+      // Navigate back to setup flow
+      _isBootstrapped = false;
+      _installedDE = '';
+      _installedDistro = '';
+      _setupStep = 0;
+      notifyListeners();
+    } catch (e) {
+      _errorMessage = 'Reinstall failed: $e';
+      notifyListeners();
+    }
+  }
+
   Future<String> executeCommand(String command) async {
     try {
       _terminalOutput.add('\$ $command\n');

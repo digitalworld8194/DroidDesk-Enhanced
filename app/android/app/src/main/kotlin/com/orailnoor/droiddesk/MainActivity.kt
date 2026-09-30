@@ -653,6 +653,13 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
+                "resetLinuxInstall" -> {
+                    thread(name = "reset-linux-install") {
+                        linuxRuntime.resetInstall()
+                        runOnUiThread { result.success(true) }
+                    }
+                }
+
                 // ── Command execution ──
                 "executeCommand" -> {
                     val command = call.argument<String>("command") ?: ""

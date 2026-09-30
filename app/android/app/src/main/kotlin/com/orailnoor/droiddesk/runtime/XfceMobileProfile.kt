@@ -7,7 +7,7 @@ import java.io.File
 /** Installs DroidDesk's touch-friendly Ubuntu-inspired XFCE defaults once per home. */
 object XfceMobileProfile {
     private const val TAG = "XfceMobileProfile"
-    private const val PROFILE_MARKER = ".droiddesk-xfce-mobile-v5"
+    private const val PROFILE_MARKER = ".droiddesk-xfce-mobile-v6"
     private const val WALLPAPER_ASSET = "droiddesk/ubuntu-touch-wallpaper.jpg"
 
     fun install(
@@ -67,12 +67,85 @@ object XfceMobileProfile {
         }
     }
 
+    /**
+     * Updates session-specific launchers (Firefox, Camera) and DPI settings.
+     * Called every session start — does not gate on a marker.
+     */
+    fun updateSessionLaunchers(
+        homeDir: File,
+        firefoxBin: File,
+        cameraPackage: String?,
+    ) {
+        try {
+            val panelDir = File(homeDir, ".config/xfce4/panel")
+
+            // Firefox launcher (launcher-23) — replace generic browser if Firefox is installed
+            if (firefoxBin.canExecute()) {
+                writeLauncher(
+                    File(panelDir, "launcher-23/droiddesk-browser.desktop"),
+                    name = "Firefox",
+                    comment = "Browse the web with Firefox",
+                    exec = "firefox %u",
+                    icon = "firefox",
+                )
+                Log.i(TAG, "Updated launcher-23 to Firefox")
+            }
+
+            // Camera launcher (launcher-26) — if a camera package is detected
+            if (cameraPackage != null) {
+                val launchScript = File(homeDir, ".local/bin/droiddesk-launch-android-app.py")
+                writeLauncher(
+                    File(panelDir, "launcher-26/droiddesk-camera.desktop"),
+                    name = "Camera",
+                    comment = "Open Android Camera",
+                    exec = "${launchScript.absolutePath} $cameraPackage",
+                    icon = "camera-photo",
+                )
+                Log.i(TAG, "Updated launcher-26 for camera package $cameraPackage")
+            }
+
+            // DPI configuration for S24 Ultra / high-density screens
+            val xresources = File(homeDir, ".Xresources")
+            val xresContent = if (xresources.exists()) xresources.readText() else ""
+            val dpiLine = "Xft.dpi: 144"
+            if (!xresContent.contains("Xft.dpi:")) {
+                xresources.appendText("\n$dpiLine\n")
+            } else {
+                // Replace existing Xft.dpi line
+                xresources.writeText(
+                    xresContent.lines().joinToString("\n") { line ->
+                        if (line.trimStart().startsWith("Xft.dpi:")) dpiLine else line
+                    } + "\n"
+                )
+            }
+
+            // fontconfig DPI
+            val fontconfigDir = File(homeDir, ".config/fontconfig")
+            fontconfigDir.mkdirs()
+            val fontsConf = File(fontconfigDir, "fonts.conf")
+            val dpi144Block = "<match target=\"pattern\"><edit name=\"dpi\"><double>144</double></edit></match>"
+            if (!fontsConf.exists() || !fontsConf.readText().contains("dpi")) {
+                fontsConf.writeText("""
+                    <?xml version="1.0"?>
+                    <!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+                    <fontconfig>
+                      $dpi144Block
+                    </fontconfig>
+                """.trimIndent() + "\n")
+                Log.i(TAG, "Wrote fontconfig DPI=144")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "updateSessionLaunchers failed (non-fatal)", e)
+        }
+    }
+
     private fun writeLauncher(
         file: File,
         name: String,
         comment: String,
         exec: String,
         icon: String,
+        terminal: Boolean = false,
     ) {
         file.parentFile?.mkdirs()
         file.writeText(
@@ -85,7 +158,7 @@ object XfceMobileProfile {
             Exec=$exec
             Icon=$icon
             StartupNotify=true
-            Terminal=false
+            Terminal=$terminal
             """.trimIndent() + "\n",
         )
     }
@@ -173,6 +246,7 @@ object XfceMobileProfile {
                 <value type="int" value="21"/>
                 <value type="int" value="22"/>
                 <value type="int" value="23"/>
+                <value type="int" value="26"/>
                 <value type="int" value="24"/>
                 <value type="int" value="25"/>
               </property>
@@ -216,6 +290,11 @@ object XfceMobileProfile {
             <property name="plugin-23" type="string" value="launcher">
               <property name="items" type="array">
                 <value type="string" value="droiddesk-browser.desktop"/>
+              </property>
+            </property>
+            <property name="plugin-26" type="string" value="launcher">
+              <property name="items" type="array">
+                <value type="string" value="droiddesk-camera.desktop"/>
               </property>
             </property>
             <property name="plugin-24" type="string" value="separator">

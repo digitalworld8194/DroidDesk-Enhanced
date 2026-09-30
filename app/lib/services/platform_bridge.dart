@@ -287,6 +287,10 @@ class DroidDeskPlatform {
     await _channel.invokeMethod('stopLinux');
   }
 
+  static Future<void> resetLinuxInstall() async {
+    await _channel.invokeMethod('resetLinuxInstall');
+  }
+
   static Future<void> launchDesktopActivity() async {
     await _channel.invokeMethod('launchDesktopActivity');
   }

@@ -14,6 +14,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.orailnoor.droiddesk.MainActivity
 import com.orailnoor.droiddesk.runtime.AndroidAppBridge
+import com.orailnoor.droiddesk.runtime.ChrootRuntime
+import com.orailnoor.droiddesk.view.DesktopActivity
+import kotlin.concurrent.thread
 
 /**
  * Foreground service that keeps the Linux runtime alive.
@@ -27,6 +30,7 @@ class DroidDeskService : Service() {
     companion object {
         const val CHANNEL_ID = "droiddesk_service"
         const val NOTIFICATION_ID = 1001
+        const val ACTION_STOP = "com.orailnoor.droiddesk.ACTION_STOP"
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -39,6 +43,23 @@ class DroidDeskService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            thread(name = "stop-desktop-service") {
+                try {
+                    com.orailnoor.droiddesk.runtime.LinuxRuntime(this).stopSession()
+                } catch (e: Exception) {
+                    android.util.Log.w("DroidDeskService", "stopSession (linux) failed", e)
+                }
+                try {
+                    ChrootRuntime(this).stopSession()
+                } catch (e: Exception) {
+                    android.util.Log.w("DroidDeskService", "stopSession (chroot) failed", e)
+                }
+                stopSelf()
+            }
+            return START_NOT_STICKY
+        }
+
         val notification = buildNotification("Linux desktop is running")
 
         ServiceCompat.startForeground(
@@ -81,10 +102,29 @@ class DroidDeskService : Service() {
     }
 
     private fun buildNotification(contentText: String): Notification {
-        val pendingIntent = PendingIntent.getActivity(
+        val contentIntent = PendingIntent.getActivity(
             this,
             0,
             Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val returnToDesktopIntent = PendingIntent.getActivity(
+            this,
+            1,
+            Intent(this, DesktopActivity::class.java).apply {
+                putExtra("startSession", false)
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+            },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val stopIntent = PendingIntent.getService(
+            this,
+            2,
+            Intent(this, DroidDeskService::class.java).apply {
+                action = ACTION_STOP
+            },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
 
@@ -92,11 +132,21 @@ class DroidDeskService : Service() {
             .setContentTitle("DroidDesk")
             .setContentText(contentText)
             .setSmallIcon(android.R.drawable.ic_menu_compass)
-            .setContentIntent(pendingIntent)
+            .setContentIntent(contentIntent)
             .setOngoing(true)
             .setSilent(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .addAction(
+                android.R.drawable.ic_menu_compass,
+                "Return to Desktop",
+                returnToDesktopIntent
+            )
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "Stop Desktop",
+                stopIntent
+            )
             .build()
     }
 
