@@ -5,6 +5,14 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+// Preview builds install side by side with the regular app under their own
+// applicationId (own data dir, own abstract sockets) and do not declare the
+// HOME intent filter. Enable with DROIDDESK_PREVIEW=1 or -Pdroiddesk.preview=true.
+val originalApplicationId = "com.orailnoor.droiddesk"
+val isPreviewBuild = (project.findProperty("droiddesk.preview") ?: System.getenv("DROIDDESK_PREVIEW"))
+    ?.toString()?.lowercase() in setOf("1", "true", "yes")
+val droiddeskApplicationId = if (isPreviewBuild) "$originalApplicationId.preview" else originalApplicationId
+
 android {
     namespace = "com.orailnoor.droiddesk"
     compileSdk = flutter.compileSdkVersion
@@ -24,11 +32,13 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.orailnoor.droiddesk"
+        applicationId = droiddeskApplicationId
         minSdk = 28  // Downgraded to 28 to bypass W^X (Write XOR Execute) restrictions on app data
         targetSdk = 28 // API 28 completely disables the Android 10+ execve() block
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        if (isPreviewBuild) versionNameSuffix = "-preview"
+        manifestPlaceholders["appLabel"] = if (isPreviewBuild) "DroidDesk Preview" else "DroidDesk"
 
         ndk {
             // ARM64 only — all modern Android phones
@@ -54,6 +64,15 @@ android {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
         }
+    }
+
+    if (isPreviewBuild) {
+        // The prebuilt jniLibs/libsocket_hook.so has the regular app's prefix
+        // compiled in; build a copy for this applicationId's data directory.
+        defaultConfig.externalNativeBuild.cmake.arguments.add(
+            "-DDROIDDESK_HOOK_PREFIX=/data/user/0/$droiddeskApplicationId/files/usr",
+        )
+        sourceSets.getByName("release").manifest.srcFile("src/preview/AndroidManifest.xml")
     }
 
     lint {

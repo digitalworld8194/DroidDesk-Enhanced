@@ -25,6 +25,7 @@ import kotlin.concurrent.thread
 object AndroidAppBridge {
     private const val TAG = "AndroidAppBridge"
     private const val SOCKET_NAME = "droiddesk.android-app-launcher"
+    private const val ORIGINAL_PACKAGE = "com.orailnoor.droiddesk"
     /** The panel's Terminal button opens the user's real Android Termux app. */
     private const val TERMUX_PACKAGE = "com.termux"
     private val DOCK_PLUGIN_IDS = 30..37
@@ -63,7 +64,7 @@ object AndroidAppBridge {
         synchronized(this) {
             if (server != null) return
             try {
-                val socket = LocalServerSocket(SOCKET_NAME)
+                val socket = LocalServerSocket(socketName(context))
                 server = socket
                 thread(name = "android-app-bridge", isDaemon = true) {
                     serve(context.applicationContext, socket)
@@ -74,6 +75,14 @@ object AndroidAppBridge {
             }
         }
     }
+
+    /**
+     * Abstract socket names are global, so side-by-side builds (the preview)
+     * need their own name; the regular app keeps the historical one.
+     */
+    private fun socketName(context: Context): String =
+        if (context.packageName == ORIGINAL_PACKAGE) SOCKET_NAME
+        else "${context.packageName}.android-app-launcher"
 
     fun stop() {
         synchronized(this) {
@@ -110,7 +119,7 @@ object AndroidAppBridge {
             if len(sys.argv) != 2:
                 raise SystemExit("Expected an Android package name")
             client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-            client.connect("\0$SOCKET_NAME")
+            client.connect("\0${socketName(context)}")
             client.sendall((sys.argv[1] + "\n").encode())
             """.trimIndent() + "\n",
         )

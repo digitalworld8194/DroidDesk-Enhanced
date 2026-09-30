@@ -352,7 +352,10 @@ class LinuxRuntime(private val context: Context) {
             // Find the hook in jniLibs
             val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
             val jniDir = File(context.applicationInfo.nativeLibraryDir)
-            val srcHook = File(jniDir, "libsocket_hook.so")
+            // Preview builds ship a hook compiled for their own prefix; the
+            // generic prebuilt one points at the regular app's data dir.
+            val srcHook = File(jniDir, "libsocket_hook_variant.so").takeIf { it.exists() }
+                ?: File(jniDir, "libsocket_hook.so")
             if (srcHook.exists()) {
                 srcHook.inputStream().use { input ->
                     destHook.outputStream().use { output ->

@@ -46,10 +46,57 @@ jobs:
 
       - name: Build release APK
         working-directory: app
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release
+          mkdir -p ../dist
+          cp build/app/outputs/flutter-apk/app-release.apk ../dist/DroidDesk-release.apk
+
+      - name: Build preview APK (com.orailnoor.droiddesk.preview)
+        working-directory: app
+        env:
+          DROIDDESK_PREVIEW: "1"
+        run: |
+          flutter build apk --release
+          cp build/app/outputs/flutter-apk/app-release.apk ../dist/DroidDesk-Preview-release.apk
+
+      - name: Verify APK package names
+        run: |
+          AAPT2="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)aapt2"
+          check() {
+            badging="$("$AAPT2" dump badging "$1")"
+            echo "$badging" | grep -E "^(package|application-label):"
+            echo "$badging" | grep "^package: name='$2'" > /dev/null || { echo "::error::$1 is not $2"; exit 1; }
+          }
+          check dist/DroidDesk-release.apk com.orailnoor.droiddesk
+          check dist/DroidDesk-Preview-release.apk com.orailnoor.droiddesk.preview
+          "$AAPT2" dump badging dist/DroidDesk-Preview-release.apk | grep "application-label:'DroidDesk Preview'" > /dev/null
+          "$AAPT2" dump xmltree --file AndroidManifest.xml dist/DroidDesk-Preview-release.apk > preview-manifest.txt
+          "$AAPT2" dump xmltree --file AndroidManifest.xml dist/DroidDesk-release.apk \
+            | grep "android.intent.category.HOME" > /dev/null
+          if grep -q "android.intent.category.HOME" preview-manifest.txt; then
+            echo "::error::Preview APK must not declare a HOME intent filter"; exit 1
+          fi
+          unzip -l dist/DroidDesk-Preview-release.apk | grep "lib/arm64-v8a/libsocket_hook_variant.so" > /dev/null
+          unzip -p dist/DroidDesk-Preview-release.apk lib/arm64-v8a/libsocket_hook_variant.so \
+            | strings | grep -x "/data/user/0/com.orailnoor.droiddesk.preview/files/usr" > /dev/null
+          sha256sum dist/*.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: DroidDesk-release-${{ github.sha }}
-          path: app/build/app/outputs/flutter-apk/app-release.apk
+          path: dist/DroidDesk-release.apk
           retention-days: 30
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DroidDesk-Preview-release-${{ github.sha }}
+          path: dist/DroidDesk-Preview-release.apk
+          retention-days: 30
+
+      - name: Dart tests
+        working-directory: app
+        run: flutter test
+
+      - name: JVM unit tests
+        working-directory: app/android
+        run: ./gradlew :app:testReleaseUnitTest --no-daemon
