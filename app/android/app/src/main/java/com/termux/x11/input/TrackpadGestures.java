@@ -64,6 +64,51 @@ public final class TrackpadGestures {
                 || (source & SOURCE_MOUSE_RELATIVE) == SOURCE_MOUSE_RELATIVE;
     }
 
+    public static final int SOURCE_TOUCHSCREEN = 0x00001002;
+
+    /**
+     * Only a finger on the phone's own touchscreen gets laptop pointer acceleration. Physical
+     * mice, physical/DeX touchpads (already accelerated by Android) and styluses keep their path.
+     */
+    public static boolean usesLaptopAcceleration(int source, int toolType) {
+        return toolType == TOOL_TYPE_FINGER
+                && (source & SOURCE_TOUCHSCREEN) == SOURCE_TOUCHSCREEN
+                && !isTouchpadFinger(source, toolType)
+                && !isDexLike(source, toolType)
+                && !isHardwareMouse(source, toolType);
+    }
+
+    /**
+     * The one mouse button a gesture holds down. Every path that ends a gesture (lift, cancel,
+     * mode switch, view teardown) releases it, and it is released exactly once.
+     */
+    public static final class HeldButton {
+        private int mButton = InputStub.BUTTON_UNDEFINED;
+
+        /** @return the button to release before pressing `button`, or BUTTON_UNDEFINED. */
+        public int press(int button) {
+            int previous = mButton;
+            mButton = button;
+            return previous == button ? InputStub.BUTTON_UNDEFINED : previous;
+        }
+
+        /** @return true if `button` was not already held, i.e. a press must be sent. */
+        public boolean needsPress(int button) {
+            return mButton != button;
+        }
+
+        /** @return the held button to release, or BUTTON_UNDEFINED if none; clears it. */
+        public int release() {
+            int button = mButton;
+            mButton = InputStub.BUTTON_UNDEFINED;
+            return button;
+        }
+
+        public boolean isHeld() {
+            return mButton != InputStub.BUTTON_UNDEFINED;
+        }
+    }
+
     /**
      * Laptop-style tap-and-drag: a one-finger tap followed, within the double-tap timeout, by a
      * touch that moves beyond the slop holds the left button until the finger lifts. Taps are not
@@ -105,9 +150,15 @@ public final class TrackpadGestures {
             return true;
         }
 
-        /** Extra finger, lift or cancel: this touch can no longer start a drag. */
+        /** Lift: this touch can no longer start a drag (a tap on lift re-arms the next touch). */
         public void cancel() {
             mArmed = false;
+        }
+
+        /** Extra finger or ACTION_CANCEL: forget the preceding tap too, so no later touch drags. */
+        public void reset() {
+            mArmed = false;
+            mLastTapTime = Long.MIN_VALUE;
         }
 
         public boolean isArmed() {

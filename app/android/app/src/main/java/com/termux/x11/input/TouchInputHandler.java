@@ -96,6 +96,16 @@ public class TouchInputHandler {
     private final TrackpadGestures.DoubleTapAnchor mDoubleTapAnchor;
     private final float[] mScrollDelta = new float[2];
 
+    /**
+     * Laptop pointer ballistics for the phone's own touchscreen in Trackpad mode. The nested
+     * handler for physical touchpads keeps the linear upstream path.
+     */
+    private final boolean mLaptopTrackpad;
+    private final PointerAcceleration mPointerAccel;
+    private final float[] mPointerDelta = new float[2];
+    private final int mTouchSlop;
+    private final float mMaxScrollStep;
+
     private InputStrategyInterface mInputStrategy;
     private final InputEventSender mInjector;
     private final MainActivity mActivity;
@@ -211,6 +221,10 @@ public class TouchInputHandler {
 
         ViewConfiguration viewConfig = ViewConfiguration.get(/*desktop*/ activity);
         int touchSlop = viewConfig.getScaledTouchSlop();
+        mLaptopTrackpad = !isTouchpad;
+        mPointerAccel = new PointerAcceleration(density);
+        mTouchSlop = touchSlop;
+        mMaxScrollStep = 48 * density;
         mTapDrag = new TrackpadGestures.TapDrag(ViewConfiguration.getDoubleTapTimeout(), touchSlop);
         mScrollAxisLock = new TrackpadGestures.ScrollAxisLock(touchSlop / 2f);
         mDoubleTapAnchor = new TrackpadGestures.DoubleTapAnchor(ViewConfiguration.getDoubleTapTimeout(),
@@ -373,11 +387,17 @@ public class TouchInputHandler {
                     mIsDragging = false;
                     mTapDrag.onDown(event.getEventTime(), event.getX(), event.getY());
                     mScrollAxisLock.reset();
+                    // GestureDetector's first scroll includes the touch slop: drop it, no jump.
+                    mPointerAccel.begin(event.getEventTime(), mTouchSlop);
                     break;
 
                 case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
                     mTapDrag.cancel();
+                    break;
+
+                case MotionEvent.ACTION_CANCEL:
+                    mTapDrag.reset();
+                    mIsDragging = false;
                     break;
 
                 case MotionEvent.ACTION_SCROLL:
@@ -389,8 +409,14 @@ public class TouchInputHandler {
 
                 case MotionEvent.ACTION_POINTER_DOWN:
                     mTotalMotionY = 0;
-                    mTapDrag.cancel();
+                    mTapDrag.reset();
                     mScrollAxisLock.reset();
+                    mPointerAccel.begin(event.getEventTime(), 0);
+                    break;
+
+                case MotionEvent.ACTION_POINTER_UP:
+                    // Back to fewer fingers: restart speed and dead zone, keep no stale remainder.
+                    mPointerAccel.begin(event.getEventTime(), 0);
                     break;
 
                 default:
@@ -415,6 +441,8 @@ public class TouchInputHandler {
     }
 
     public void setInputMode(@InputMode int inputMode) {
+        // A drag in progress must not leave its button stuck when the strategy is replaced.
+        releaseButtons();
         if (mTouchpadHandler == null)
             mInputStrategy = new InputStrategyInterface.TrackpadInputStrategy(mInjector);
         else if (inputMode == InputMode.TOUCH)
@@ -423,6 +451,15 @@ public class TouchInputHandler {
             mInputStrategy = new InputStrategyInterface.SimulatedTouchInputStrategy(mRenderData, mInjector, mActivity);
         else
             mInputStrategy = new InputStrategyInterface.TrackpadInputStrategy(mInjector);
+    }
+
+    /** Releases any button held by a drag (mode switch, view teardown). Safe to call anytime. */
+    public void releaseButtons() {
+        if (mInputStrategy != null)
+            mInputStrategy.releaseButtons();
+        mIsDragging = false;
+        if (mTapDrag != null)
+            mTapDrag.reset();
     }
 
     public void setCapturingEnabled(boolean enabled) {
@@ -460,6 +497,7 @@ public class TouchInputHandler {
                 "1".equals(p.touchMode.get()) &&
                 !"native".equals(p.displayResolutionMode.get());
         mInjector.capturedPointerSpeedFactor = ((float) p.capturedPointerSpeedFactor.get())/100;
+        mPointerAccel.setSensitivity(PointerAcceleration.sensitivityFromPercent(p.trackpadSensitivity.get()));
         mInjector.dexMetaKeyCapture = p.dexMetaKeyCapture.get();
         mInjector.stylusIsMouse = p.stylusIsMouse.get();
         mInjector.stylusButtonContactModifierMode = p.stylusButtonContactModifierMode.get();
@@ -669,6 +707,8 @@ public class TouchInputHandler {
                     moveCursorToScreenPoint(e1.getX(), e1.getY());
                 }
                 mScrollAxisLock.filter(distanceX, distanceY, mScrollDelta);
+                if (mLaptopTrackpad)
+                    PointerAcceleration.limitScroll(mScrollDelta[0], mScrollDelta[1], mMaxScrollStep, mScrollDelta);
                 if (mScrollDelta[0] != 0 || mScrollDelta[1] != 0)
                     mInputStrategy.onScroll(mScrollDelta[0], mScrollDelta[1]);
 
@@ -681,6 +721,14 @@ public class TouchInputHandler {
                 return false;
 
             if (mInputStrategy instanceof InputStrategyInterface.TrackpadInputStrategy) {
+                if (mLaptopTrackpad && TrackpadGestures.usesLaptopAcceleration(e2.getSource(), e2.getToolType(0))) {
+                    // distance is last - current; the finger moved by its negation.
+                    float scaleX = mInjector.scaleTouchpad ? mRenderData.scale.x : 1;
+                    float scaleY = mInjector.scaleTouchpad ? mRenderData.scale.y : 1;
+                    if (mPointerAccel.move(e2.getEventTime(), -distanceX, -distanceY, scaleX, scaleY, mPointerDelta))
+                        mInjector.sendCursorMove(mPointerDelta[0], mPointerDelta[1], true);
+                    return true;
+                }
                 if (mInjector.scaleTouchpad) {
                     distanceX *= mRenderData.scale.x;
                     distanceY *= mRenderData.scale.y;
@@ -764,6 +812,11 @@ public class TouchInputHandler {
             if (button == InputStub.BUTTON_UNDEFINED) {
                 return;
             }
+
+            // Laptop touchpads never press a button because a finger rested: in Trackpad mode on
+            // the touchscreen, dragging is tap + touch-and-move (TapDrag) only.
+            if (mLaptopTrackpad && mInputStrategy instanceof InputStrategyInterface.TrackpadInputStrategy)
+                return;
 
             if (!(mInputStrategy instanceof InputStrategyInterface.TrackpadInputStrategy)) {
                 if (screenPointLiesOutsideImageBoundary(x, y))

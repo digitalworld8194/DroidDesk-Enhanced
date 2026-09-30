@@ -41,6 +41,8 @@ public class Prefs {
     public Pref<Boolean> preferScancodes = new Pref<>(false);
     public Pref<Boolean> scaleTouchpad = new Pref<>(false);
     public Pref<Integer> capturedPointerSpeedFactor = new Pref<>(100);
+    /** Touchscreen Trackpad-mode pointer sensitivity, percent (25..300). */
+    public Pref<Integer> trackpadSensitivity = new Pref<>(100);
     public Pref<Boolean> dexMetaKeyCapture = new Pref<>(false);
     public Pref<Boolean> stylusIsMouse = new Pref<>(false);
     

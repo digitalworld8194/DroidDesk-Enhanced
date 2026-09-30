@@ -47,6 +47,9 @@ public interface InputStrategyInterface {
      */
     void onScroll(float distanceX, float distanceY);
 
+    /** Releases any button held by a drag, e.g. before the strategy is replaced. */
+    default void releaseButtons() {}
+
     class NullInputStrategy implements InputStrategyInterface {
         @Override public void onTap(int button) {}
         @Override public boolean onPressAndHold(int button, boolean force) { return false; }
@@ -167,8 +170,13 @@ public interface InputStrategyInterface {
         public void onMotionEvent(MotionEvent event) {
             // Release on CANCEL too, otherwise an interrupted drag leaves the button stuck down.
             int action = event.getActionMasked();
-            if ((action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL)
-                    && mHeldButton != InputStub.BUTTON_UNDEFINED) {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL)
+                releaseButtons();
+        }
+
+        @Override
+        public void releaseButtons() {
+            if (mHeldButton != InputStub.BUTTON_UNDEFINED) {
                 mInjector.sendMouseUp(mHeldButton, false);
                 mHeldButton = InputStub.BUTTON_UNDEFINED;
             }
@@ -199,8 +207,8 @@ public interface InputStrategyInterface {
     class TrackpadInputStrategy implements InputStrategyInterface {
         private final InputEventSender mInjector;
 
-        /** Mouse-button currently held down, or BUTTON_UNDEFINED otherwise. */
-        private int mHeldButton = InputStub.BUTTON_UNDEFINED;
+        /** Mouse-button currently held down by a drag. */
+        private final TrackpadGestures.HeldButton mHeldButton = new TrackpadGestures.HeldButton();
 
         public TrackpadInputStrategy(InputEventSender injector) {
             if ((mInjector = injector) == null)
@@ -217,8 +225,14 @@ public interface InputStrategyInterface {
             if (mInjector.tapToMove && !force)
                 return false;
 
-            mInjector.sendMouseDown(button, true);
-            mHeldButton = button;
+            // Never stack presses: a second hold of the same button is a no-op, a different one
+            // releases the first.
+            if (mHeldButton.needsPress(button)) {
+                int previous = mHeldButton.press(button);
+                if (previous != InputStub.BUTTON_UNDEFINED)
+                    mInjector.sendMouseUp(previous, true);
+                mInjector.sendMouseDown(button, true);
+            }
             return true;
         }
 
@@ -231,11 +245,15 @@ public interface InputStrategyInterface {
         public void onMotionEvent(MotionEvent event) {
             // Release on CANCEL too, otherwise an interrupted drag leaves the button stuck down.
             int action = event.getActionMasked();
-            if ((action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL)
-                    && mHeldButton != InputStub.BUTTON_UNDEFINED) {
-                mInjector.sendMouseUp(mHeldButton, true);
-                mHeldButton = InputStub.BUTTON_UNDEFINED;
-            }
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL)
+                releaseButtons();
+        }
+
+        @Override
+        public void releaseButtons() {
+            int button = mHeldButton.release();
+            if (button != InputStub.BUTTON_UNDEFINED)
+                mInjector.sendMouseUp(button, true);
         }
     }
 }

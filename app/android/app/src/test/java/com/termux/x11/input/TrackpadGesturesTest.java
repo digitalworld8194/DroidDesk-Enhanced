@@ -86,7 +86,9 @@ public class TrackpadGesturesTest {
         TrackpadGestures.TapDrag drag = new TrackpadGestures.TapDrag(DOUBLE_TAP_TIMEOUT, SLOP);
         drag.onTap(1000);
         drag.onDown(1100, 50, 50);
-        drag.cancel(); // ACTION_POINTER_DOWN: becomes a two-finger gesture
+        drag.reset(); // ACTION_POINTER_DOWN: becomes a two-finger gesture
+        assertFalse(drag.onMove(300, 50));
+        drag.onDown(1150, 50, 50); // one finger again, still inside the old window
         assertFalse(drag.onMove(300, 50));
     }
 
@@ -181,5 +183,70 @@ public class TrackpadGesturesTest {
 
     @Test public void stylusIsNotAMouse() {
         assertFalse(TrackpadGestures.isHardwareMouse(SOURCE_TOUCHSCREEN, TOOL_TYPE_STYLUS));
+    }
+
+    // --- laptop acceleration applies to the touchscreen finger only ---
+
+    @Test public void touchscreenFingerGetsLaptopAcceleration() {
+        assertTrue(TrackpadGestures.usesLaptopAcceleration(SOURCE_TOUCHSCREEN, TrackpadGestures.TOOL_TYPE_FINGER));
+    }
+
+    @Test public void physicalMouseMovementIsNotModified() {
+        assertFalse(TrackpadGestures.usesLaptopAcceleration(TrackpadGestures.SOURCE_MOUSE, TrackpadGestures.TOOL_TYPE_MOUSE));
+        assertFalse(TrackpadGestures.usesLaptopAcceleration(TrackpadGestures.SOURCE_MOUSE_RELATIVE, TrackpadGestures.TOOL_TYPE_MOUSE));
+        // A mouse reports SOURCE_MOUSE = 0x2002, which shares the pointer class bit with touchscreens.
+        assertFalse(TrackpadGestures.usesLaptopAcceleration(TrackpadGestures.SOURCE_MOUSE, TrackpadGestures.TOOL_TYPE_FINGER));
+    }
+
+    @Test public void physicalTouchpadAndStylusAreNotModified() {
+        assertFalse(TrackpadGestures.usesLaptopAcceleration(TrackpadGestures.SOURCE_TOUCHPAD, TrackpadGestures.TOOL_TYPE_FINGER));
+        assertFalse(TrackpadGestures.usesLaptopAcceleration(SOURCE_TOUCHSCREEN, TOOL_TYPE_STYLUS));
+    }
+
+    // --- drag button: pressed once, released once ---
+
+    @Test public void dragButtonIsReleasedExactlyOnce() {
+        TrackpadGestures.HeldButton held = new TrackpadGestures.HeldButton();
+        assertTrue(held.needsPress(InputStub.BUTTON_LEFT));
+        assertEquals(InputStub.BUTTON_UNDEFINED, held.press(InputStub.BUTTON_LEFT));
+        assertFalse("a second hold must not press again", held.needsPress(InputStub.BUTTON_LEFT));
+        assertEquals(InputStub.BUTTON_LEFT, held.release());
+        assertEquals("lift after cancel must not release twice", InputStub.BUTTON_UNDEFINED, held.release());
+        assertFalse(held.isHeld());
+    }
+
+    @Test public void pressingAnotherButtonReleasesTheFirst() {
+        TrackpadGestures.HeldButton held = new TrackpadGestures.HeldButton();
+        held.press(InputStub.BUTTON_LEFT);
+        assertEquals(InputStub.BUTTON_LEFT, held.press(InputStub.BUTTON_RIGHT));
+        assertEquals(InputStub.BUTTON_RIGHT, held.release());
+    }
+
+    @Test public void cancelledDragNeverStarts() {
+        TrackpadGestures.TapDrag drag = new TrackpadGestures.TapDrag(DOUBLE_TAP_TIMEOUT, SLOP);
+        drag.onTap(1000);
+        drag.onDown(1100, 50, 50);
+        drag.reset(); // ACTION_CANCEL before moving
+        assertFalse(drag.onMove(200, 50));
+        // The next touch is no longer inside a tap-and-drag.
+        drag.onDown(1200, 50, 50);
+        assertFalse(drag.onMove(200, 50));
+    }
+
+    // --- double tap tolerance in trackpad mode ---
+
+    @Test public void secondTapWithSmallWobbleIsAClickNotADrag() {
+        TrackpadGestures.TapDrag drag = new TrackpadGestures.TapDrag(DOUBLE_TAP_TIMEOUT, SLOP);
+        drag.onTap(0);
+        drag.onDown(DOUBLE_TAP_TIMEOUT, 100, 100);
+        assertFalse(drag.onMove(100 + SLOP * 0.7f, 100 + SLOP * 0.7f)); // ~0.99 slop
+        assertTrue(drag.isArmed());
+    }
+
+    @Test public void secondTouchMovingPastToleranceBecomesDrag() {
+        TrackpadGestures.TapDrag drag = new TrackpadGestures.TapDrag(DOUBLE_TAP_TIMEOUT, SLOP);
+        drag.onTap(0);
+        drag.onDown(DOUBLE_TAP_TIMEOUT, 100, 100);
+        assertTrue(drag.onMove(100 + SLOP + 1, 100));
     }
 }
