@@ -8,8 +8,11 @@ import android.graphics.Canvas
 import android.net.LocalServerSocket
 import android.net.LocalSocket
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.util.Log
+import android.widget.Toast
 import java.io.File
 import kotlin.concurrent.thread
 
@@ -22,6 +25,9 @@ import kotlin.concurrent.thread
 object AndroidAppBridge {
     private const val TAG = "AndroidAppBridge"
     private const val SOCKET_NAME = "droiddesk.android-app-launcher"
+    /** The panel's Terminal button opens the user's real Android Termux app. */
+    private const val TERMUX_PACKAGE = "com.termux"
+    private val DOCK_PLUGIN_IDS = 30..37
 
     @Volatile private var server: LocalServerSocket? = null
 
@@ -138,6 +144,9 @@ object AndroidAppBridge {
                 """.trimIndent() + "\n",
             )
         }
+        val termuxIcon = File(iconsDir, "$TERMUX_PACKAGE.png").takeIf { it.isFile }
+            ?.let { sessionPath(it) } ?: "utilities-terminal"
+        writeTerminalPanelLauncher(homeDir, "$pythonPath $launcherPath $TERMUX_PACKAGE", termuxIcon)
         syncUtilityLaunchers(homeDir, pythonPath, launcherPath, sessionPath(homeDir))
         syncDockLaunchers(context, homeDir, activities, appsDir)
         Log.i(TAG, "Synced ${activities.size} Android app launchers into ${appsDir.absolutePath}")
@@ -197,7 +206,42 @@ object AndroidAppBridge {
                 """.trimIndent() + "\n",
             )
         }
+        File(appsDir, "droiddesk-linux-terminal.desktop").writeText(
+            """
+            [Desktop Entry]
+            Type=Application
+            Name=Linux Terminal
+            Comment=Open a terminal inside the Linux desktop
+            TryExec=xfce4-terminal
+            Exec=xfce4-terminal
+            Icon=org.xfce.terminalemulator
+            Terminal=false
+            Categories=System;TerminalEmulator;
+            Keywords=shell;console;linux;
+            """.trimIndent() + "\n",
+        )
+    }
 
+    /**
+     * Rewrites the fixed panel Terminal slot (launcher-21) every sync so existing
+     * profiles switch to Android Termux; the Linux terminal stays in the menu.
+     */
+    private fun writeTerminalPanelLauncher(homeDir: File, exec: String, icon: String) {
+        val file = File(homeDir, ".config/xfce4/panel/launcher-21/droiddesk-terminal.desktop")
+        file.parentFile?.mkdirs()
+        file.writeText(
+            """
+            [Desktop Entry]
+            Version=1.0
+            Type=Application
+            Name=Terminal
+            Comment=Open Android Termux ($TERMUX_PACKAGE)
+            Exec=$exec
+            Icon=$icon
+            StartupNotify=false
+            Terminal=false
+            """.trimIndent() + "\n",
+        )
     }
 
     private fun syncDockLaunchers(
@@ -207,7 +251,7 @@ object AndroidAppBridge {
         appsDir: File,
     ) {
         val byPackage = activities.associateBy { it.activityInfo.packageName }
-        val dockEntries = getDockPackages(context).mapIndexedNotNull { index, packageName ->
+        val dockEntries = panelDockPackages(context, homeDir).mapIndexedNotNull { index, packageName ->
             if (!byPackage.containsKey(packageName)) return@mapIndexedNotNull null
             val safeName = packageName.replace(Regex("[^A-Za-z0-9_.-]"), "_")
             val source = File(appsDir, "$safeName.desktop")
@@ -228,9 +272,11 @@ object AndroidAppBridge {
         val idEnd = "<!-- DroidDesk Android dock ids end -->"
         val pluginStart = "<!-- DroidDesk Android dock plugins start -->"
         val pluginEnd = "<!-- DroidDesk Android dock plugins end -->"
-        var xml = panelFile.readText()
-            .replace(managedXmlBlock(idStart, idEnd), "")
-            .replace(managedXmlBlock(pluginStart, pluginEnd), "")
+        var xml = stripDockEntries(
+            panelFile.readText()
+                .replace(managedXmlBlock(idStart, idEnd), "")
+                .replace(managedXmlBlock(pluginStart, pluginEnd), ""),
+        )
 
         val idNeedle = Regex("<value type=\\\"int\\\" value=\\\"24\\\"/>")
         idNeedle.find(xml)?.let { match ->
@@ -271,14 +317,15 @@ object AndroidAppBridge {
     }
 
     /** Updates the active xfconf session; editing its XML file alone is not enough while XFCE is running. */
-    fun xfceDockCommand(context: Context): String {
-        val dock = getDockPackages(context).mapIndexed { index, packageName ->
+    fun xfceDockCommand(context: Context, homeDir: File): String {
+        val dock = panelDockPackages(context, homeDir).mapIndexed { index, packageName ->
             val safeName = packageName.replace(Regex("[^A-Za-z0-9_.-]"), "_")
             (30 + index) to "droiddesk-android-$safeName.desktop"
         }
-        val pluginIds = listOf(20, 21, 22, 23) + dock.map { it.first } + listOf(24, 25)
+        val camera = listOf(26).filter { cameraLauncherFile(homeDir).isFile }
+        val pluginIds = listOf(20, 21, 22, 23) + camera + dock.map { it.first } + listOf(24, 25)
         return buildString {
-            for (id in 30..37) {
+            for (id in DOCK_PLUGIN_IDS) {
                 append("xfconf-query -c xfce4-panel -p /plugins/plugin-$id -r >/dev/null 2>&1 || true; ")
             }
             append("xfconf-query -c xfce4-panel -p /panels/panel-2/plugin-ids -a ")
@@ -296,6 +343,58 @@ object AndroidAppBridge {
         RegexOption.DOT_MATCHES_ALL,
     )
 
+    private fun cameraLauncherFile(homeDir: File) =
+        File(homeDir, ".config/xfce4/panel/launcher-26/droiddesk-camera.desktop")
+
+    /** Dock packages minus those already shown by a fixed panel launcher (Terminal, Camera). */
+    private fun panelDockPackages(context: Context, homeDir: File): List<String> {
+        val cameraPackage = cameraLauncherFile(homeDir).takeIf { it.isFile }
+            ?.readLines()?.firstOrNull { it.startsWith("Exec=") }
+            ?.substringAfterLast(' ')?.trim()
+        val fixed = setOfNotNull(TERMUX_PACKAGE, cameraPackage)
+        return getDockPackages(context).filterNot { it in fixed }.distinct()
+    }
+
+    /**
+     * xfconfd rewrites xfce4-panel.xml without comments, so the managed markers
+     * can disappear and old dock entries would be added a second time. Remove
+     * every dock id from panel-2 and every dock plugin definition explicitly.
+     */
+    private fun stripDockEntries(xml: String): String {
+        val dockValue = Regex("\\s*<value type=\"int\" value=\"(3[0-7])\"/>")
+        val panel2Ids = Regex(
+            "(<property name=\"panel-2\".*?<property name=\"plugin-ids\" type=\"array\">)(.*?)(</property>)",
+            RegexOption.DOT_MATCHES_ALL,
+        )
+        var result = panel2Ids.replace(xml) { match ->
+            match.groupValues[1] + match.groupValues[2].replace(dockValue, "") + match.groupValues[3]
+        }
+        for (id in DOCK_PLUGIN_IDS) {
+            while (true) {
+                val start = result.indexOf("<property name=\"plugin-$id\"")
+                if (start < 0) break
+                val end = propertyEnd(result, start) ?: break
+                val lineStart = result.lastIndexOf('\n', start - 1)
+                val from = if (lineStart >= 0 && result.substring(lineStart + 1, start).isBlank()) lineStart else start
+                result = result.removeRange(from, end)
+            }
+        }
+        return result
+    }
+
+    /** Index just past the `</property>` closing the element that opens at [start]. */
+    private fun propertyEnd(xml: String, start: Int): Int? {
+        var depth = 0
+        for (tag in Regex("<property\\b[^>]*?(/?)>|</property>").findAll(xml, start)) {
+            when {
+                tag.value == "</property>" -> depth--
+                tag.groupValues[1] != "/" -> depth++
+            }
+            if (depth == 0) return tag.range.last + 1
+        }
+        return null
+    }
+
     private fun serve(context: Context, socket: LocalServerSocket) {
         while (server === socket) {
             var client: LocalSocket? = null
@@ -304,8 +403,8 @@ object AndroidAppBridge {
                 val command = client.inputStream.bufferedReader().readLine()?.trim().orEmpty()
                 if (command.startsWith("action:")) {
                     launchSystemAction(context, command.removePrefix("action:"))
-                } else {
-                    launchPackage(context, command)
+                } else if (!launchPackage(context, command)) {
+                    showLaunchFailure(context, command)
                 }
             } catch (error: Exception) {
                 if (server === socket) Log.w(TAG, "Android app launcher request failed", error)
@@ -322,6 +421,20 @@ object AndroidAppBridge {
         return runCatching { context.startActivity(intent); true }
             .onFailure { Log.w(TAG, "Could not launch Android package $packageName", it) }
             .getOrDefault(false)
+    }
+
+    private fun showLaunchFailure(context: Context, packageName: String) {
+        val installed = context.packageManager.getLaunchIntentForPackage(packageName) != null
+        val message = when {
+            packageName == TERMUX_PACKAGE && !installed ->
+                "Termux ($TERMUX_PACKAGE) is not installed. Install Termux to use the Terminal button."
+            !installed -> "Android app $packageName is not installed"
+            else -> "Could not open Android app $packageName"
+        }
+        Log.w(TAG, message)
+        Handler(Looper.getMainLooper()).post {
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+        }
     }
 
     fun launchSystemAction(context: Context, action: String) {

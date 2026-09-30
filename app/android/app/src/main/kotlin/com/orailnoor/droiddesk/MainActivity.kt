@@ -770,28 +770,30 @@ class MainActivity : FlutterActivity() {
         val rooted = chrootRuntime.hasRoot()
         if (rooted) {
             val rootfs = java.io.File(filesDir, "rootfs")
+            val homeDir = java.io.File(rootfs, "root")
             AndroidAppBridge.syncLaunchers(
                 context = this,
-                homeDir = java.io.File(rootfs, "root"),
+                homeDir = homeDir,
                 python = java.io.File(rootfs, "usr/bin/python3"),
                 sessionRoot = rootfs,
             )
             if (chrootRuntime.isRunning()) {
                 chrootRuntime.executeCommand(
                     "export DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/dbus-session; " +
-                        AndroidAppBridge.xfceDockCommand(this) +
+                        AndroidAppBridge.xfceDockCommand(this, homeDir) +
                         " DISPLAY=:0 xfce4-panel -r >/dev/null 2>&1 || true",
                 )
             }
         } else {
+            val homeDir = java.io.File(filesDir, "home")
             AndroidAppBridge.syncLaunchers(
                 context = this,
-                homeDir = java.io.File(filesDir, "home"),
+                homeDir = homeDir,
                 python = java.io.File(filesDir, "usr/bin/python3"),
             )
             if (linuxRuntime.isRunning()) {
                 linuxRuntime.executeCommand(
-                    AndroidAppBridge.xfceDockCommand(this) +
+                    AndroidAppBridge.xfceDockCommand(this, homeDir) +
                         " DISPLAY=:0 xfce4-panel -r >/dev/null 2>&1 || true",
                 )
             }
