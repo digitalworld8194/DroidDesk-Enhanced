@@ -600,7 +600,7 @@ class HomeScreen extends StatelessWidget {
                   ),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.settings_rounded, color: DroidTheme.textSecondary),
+                    leading: Icon(Icons.settings_rounded, color: DroidTheme.textSecondary),
                     title: const Text('Android Settings'),
                     subtitle: const Text('Open Android system settings directly'),
                     onTap: () {
@@ -610,7 +610,7 @@ class HomeScreen extends StatelessWidget {
                   ),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.home_work_rounded, color: DroidTheme.textSecondary),
+                    leading: Icon(Icons.home_work_rounded, color: DroidTheme.textSecondary),
                     title: const Text('Change Home App'),
                     subtitle: const Text('Open Android Home app chooser'),
                     onTap: () {
