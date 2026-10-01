@@ -63,8 +63,8 @@ assert m["label"] == label, f"label is {m['label']}, expected {label}"
 assert m["declaresHome"], "APK does not declare MAIN/HOME/DEFAULT"
 assert m["declaresLauncher"], "APK has no MAIN/LAUNCHER entry"
 EOF
-unzip -l "$source_apk" | grep -q ' lib/arm64-v8a/' || die "no arm64-v8a libraries"
-unzip -p "$source_apk" lib/arm64-v8a/libsocket_hook_variant.so 2>/dev/null | strings | grep -qx "$HOOK_PREFIX" \
+unzip -l "$source_apk" | awk '$4 ~ /^lib\/arm64-v8a\// {found=1} END {exit !found}' || die "no arm64-v8a libraries"
+unzip -p "$source_apk" lib/arm64-v8a/libsocket_hook_variant.so 2>/dev/null | strings | awk -v expected="$HOOK_PREFIX" '$0 == expected {found=1} END {exit !found}' \
   || die "libsocket_hook_variant.so missing or not built for $HOOK_PREFIX"
 
 echo "== Signing with the permanent key"
