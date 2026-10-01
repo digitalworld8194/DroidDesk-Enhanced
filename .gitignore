@@ -33,3 +33,11 @@ local.properties
 /app/sources.list.*
 /app/test_*.sh
 /app/android/app/close_range_hack.c
+
+# Permanent signing key material — lives in ~/.droiddesk-signing, never in Git.
+.droiddesk-signing/
+*.p12
+*.pk8
+*.pem
+keystore.properties
+/dist/

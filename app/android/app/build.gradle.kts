@@ -5,13 +5,25 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
-// Preview builds install side by side with the regular app under their own
-// applicationId (own data dir, own abstract sockets) and do not declare the
-// HOME intent filter. Enable with DROIDDESK_PREVIEW=1 or -Pdroiddesk.preview=true.
+// Preview builds (com.orailnoor.droiddesk.preview) are the daily-driver
+// DroidDesk: they install side by side with the original app under their own
+// applicationId (own data dir, own abstract sockets), are labelled
+// "DroidDesk" and declare HOME like the original. Enable with
+// DROIDDESK_PREVIEW=1 or -Pdroiddesk.preview=true.
 val originalApplicationId = "com.orailnoor.droiddesk"
 val isPreviewBuild = (project.findProperty("droiddesk.preview") ?: System.getenv("DROIDDESK_PREVIEW"))
     ?.toString()?.lowercase() in setOf("1", "true", "yes")
 val droiddeskApplicationId = if (isPreviewBuild) "$originalApplicationId.preview" else originalApplicationId
+
+// Permanent release key, kept outside the repository (see SIGNING.md). When the
+// properties file is absent (e.g. CI) release builds fall back to the debug key
+// and must be re-signed with scripts/sign-and-install.sh before installing.
+val releaseKeystoreProperties = java.util.Properties().apply {
+    val path = System.getenv("DROIDDESK_KEYSTORE_PROPERTIES")
+        ?: "${System.getProperty("user.home")}/.droiddesk-signing/keystore.properties"
+    val file = File(path)
+    if (file.isFile) file.inputStream().use { load(it) }
+}
 
 android {
     namespace = "com.orailnoor.droiddesk"
@@ -38,7 +50,7 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         if (isPreviewBuild) versionNameSuffix = "-preview"
-        manifestPlaceholders["appLabel"] = if (isPreviewBuild) "DroidDesk Preview" else "DroidDesk"
+        manifestPlaceholders["appLabel"] = "DroidDesk"
 
         ndk {
             // ARM64 only — all modern Android phones
@@ -46,11 +58,23 @@ android {
         }
     }
 
+    signingConfigs {
+        if (!releaseKeystoreProperties.isEmpty) {
+            create("permanent") {
+                storeFile = file(releaseKeystoreProperties.getProperty("storeFile"))
+                storePassword = releaseKeystoreProperties.getProperty("storePassword")
+                keyAlias = releaseKeystoreProperties.getProperty("keyAlias")
+                keyPassword = releaseKeystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             // GitHub-distributed testing builds intentionally use Android's
-            // debug key so release APKs are directly installable.
-            signingConfig = signingConfigs.getByName("debug")
+            // debug key so release APKs are directly installable; local builds
+            // with the permanent key available sign with it instead.
+            signingConfig = signingConfigs.findByName("permanent") ?: signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -72,7 +96,6 @@ android {
         defaultConfig.externalNativeBuild.cmake.arguments.add(
             "-DDROIDDESK_HOOK_PREFIX=/data/user/0/$droiddeskApplicationId/files/usr",
         )
-        sourceSets.getByName("release").manifest.srcFile("src/preview/AndroidManifest.xml")
     }
 
     lint {

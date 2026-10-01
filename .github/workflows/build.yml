@@ -51,7 +51,7 @@ jobs:
           mkdir -p ../dist
           cp build/app/outputs/flutter-apk/app-release.apk ../dist/DroidDesk-release.apk
 
-      - name: Build preview APK (com.orailnoor.droiddesk.preview)
+      - name: Build daily-driver APK (com.orailnoor.droiddesk.preview)
         working-directory: app
         env:
           DROIDDESK_PREVIEW: "1"
@@ -69,13 +69,13 @@ jobs:
           }
           check dist/DroidDesk-release.apk com.orailnoor.droiddesk
           check dist/DroidDesk-Preview-release.apk com.orailnoor.droiddesk.preview
-          "$AAPT2" dump badging dist/DroidDesk-Preview-release.apk | grep "application-label:'DroidDesk Preview'" > /dev/null
-          "$AAPT2" dump xmltree --file AndroidManifest.xml dist/DroidDesk-Preview-release.apk > preview-manifest.txt
-          "$AAPT2" dump xmltree --file AndroidManifest.xml dist/DroidDesk-release.apk \
-            | grep "android.intent.category.HOME" > /dev/null
-          if grep -q "android.intent.category.HOME" preview-manifest.txt; then
-            echo "::error::Preview APK must not declare a HOME intent filter"; exit 1
-          fi
+          "$AAPT2" dump badging dist/DroidDesk-Preview-release.apk | grep "application-label:'DroidDesk'" > /dev/null \
+            || { echo "::error::Preview APK must be labelled DroidDesk"; exit 1; }
+          for apk in dist/DroidDesk-release.apk dist/DroidDesk-Preview-release.apk; do
+            "$AAPT2" dump xmltree --file AndroidManifest.xml "$apk" | grep "android.intent.category.HOME" > /dev/null \
+              || { echo "::error::$apk must declare a HOME intent filter"; exit 1; }
+          done
+          python3 scripts/apk_manifest.py dist/DroidDesk-Preview-release.apk
           unzip -l dist/DroidDesk-Preview-release.apk | grep "lib/arm64-v8a/libsocket_hook_variant.so" > /dev/null
           unzip -p dist/DroidDesk-Preview-release.apk lib/arm64-v8a/libsocket_hook_variant.so \
             | strings | grep -x "/data/user/0/com.orailnoor.droiddesk.preview/files/usr" > /dev/null
