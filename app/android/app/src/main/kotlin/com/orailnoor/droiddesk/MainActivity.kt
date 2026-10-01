@@ -16,6 +16,7 @@ import com.orailnoor.droiddesk.runtime.LinuxRuntime
 import com.orailnoor.droiddesk.runtime.ChrootRuntime
 import com.orailnoor.droiddesk.runtime.RootShell
 import com.orailnoor.droiddesk.runtime.AndroidAppBridge
+import com.orailnoor.droiddesk.runtime.ControlBridge
 import com.orailnoor.droiddesk.runtime.DesktopIntegration
 import com.orailnoor.droiddesk.view.AndroidSurfaceViewFactory
 import com.orailnoor.droiddesk.x11.X11ServerService
@@ -28,7 +29,9 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val CHANNEL = "com.droiddesk/core"
         private const val TAG = "MainActivity"
-        private val packageOperationRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+        // Shared with the Termux control bridge so package transactions never overlap.
+        private val packageOperationRunning = LinuxRuntime.packageOperationRunning
+        private const val CONTROL_OWNER = "MainActivity"
     }
 
     private lateinit var linuxRuntime: LinuxRuntime
@@ -44,6 +47,9 @@ class MainActivity : FlutterActivity() {
         linuxRuntime = LinuxRuntime(this)
         chrootRuntime = ChrootRuntime(this)
         desktopIntegration = DesktopIntegration(this)
+        // MainActivity is the HOME screen, so this keeps droiddeskctl reachable
+        // even when no Linux desktop is running.
+        ControlBridge.acquire(this, CONTROL_OWNER)
 
         if (intent.getBooleanExtra("autoSetup", false)) {
             runAutoChrootSetup()
@@ -54,6 +60,11 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         restoreSystemBars()
+    }
+
+    override fun onDestroy() {
+        ControlBridge.release(CONTROL_OWNER)
+        super.onDestroy()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {

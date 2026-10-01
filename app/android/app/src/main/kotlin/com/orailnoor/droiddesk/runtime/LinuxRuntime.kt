@@ -4,6 +4,8 @@ import com.orailnoor.droiddesk.R
 import android.content.Context
 import android.os.Build
 import android.util.Log
+import com.orailnoor.droiddesk.runtime.control.ProcessRunner
+import com.orailnoor.droiddesk.runtime.control.ToolChecks
 import java.io.File
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -69,6 +71,16 @@ class LinuxRuntime(private val context: Context) {
         // wrappers operate on the same session.
         @Volatile private var sessionProcess: Process? = null
         @Volatile private var dbusProcess: Process? = null
+
+        /**
+         * Process-wide guard for apt/dpkg transactions. Shared by the in-app
+         * package store and the Termux control bridge so they never run two
+         * transactions (or clear each other's locks) at the same time.
+         */
+        val packageOperationRunning = java.util.concurrent.atomic.AtomicBoolean(false)
+
+        const val TERMUX_PREFIX = "/data/data/com.termux/files/usr"
+        private val MAINTAINER_SCRIPTS = listOf("preinst", "postinst", "prerm", "postrm", "config")
     }
 
     @Volatile private var activeCommandProcess: Process? = null
@@ -348,30 +360,67 @@ class LinuxRuntime(private val context: Context) {
             val libDir = File(prefixDir, "lib")
             libDir.mkdirs()
             val destHook = File(libDir, "libsocket_hook.so")
-            if (destHook.exists()) return
+            // A hook compiled for another prefix (e.g. the regular app's data
+            // dir copied before the preview had its own variant) silently
+            // breaks every path redirection, so only keep one built for us.
+            if (destHook.exists() && hookMatchesPrefix(destHook)) return
 
-            // Find the hook in jniLibs
-            val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
             val jniDir = File(context.applicationInfo.nativeLibraryDir)
             // Preview builds ship a hook compiled for their own prefix; the
             // generic prebuilt one points at the regular app's data dir.
-            val srcHook = File(jniDir, "libsocket_hook_variant.so").takeIf { it.exists() }
-                ?: File(jniDir, "libsocket_hook.so")
-            if (srcHook.exists()) {
-                srcHook.inputStream().use { input ->
-                    destHook.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
+            val candidates = listOf(
+                File(jniDir, "libsocket_hook_variant.so"),
+                File(jniDir, "libsocket_hook.so"),
+            ).filter { it.exists() }
+            val srcHook = candidates.firstOrNull(::hookMatchesPrefix)
+                // Unknown prefix spelling: keep the historical first-copy behaviour.
+                ?: candidates.firstOrNull()?.takeIf { !destHook.exists() }
+            if (srcHook == null) {
+                if (destHook.exists()) {
+                    Log.w(TAG, "Installed socket hook targets another prefix and no matching prebuilt exists")
+                } else {
+                    Log.w(TAG, "Prebuilt socket hook not found in jniLibs at ${jniDir.absolutePath}")
                 }
-                destHook.setExecutable(true, false)
-                Log.i(TAG, "Copied prebuilt socket hook to ${destHook.absolutePath}")
-            } else {
-                Log.w(TAG, "Prebuilt socket hook not found in jniLibs at ${srcHook.absolutePath}")
+                return
             }
+            if (destHook.exists()) {
+                Log.w(TAG, "Replacing socket hook built for another prefix with ${srcHook.name}")
+            }
+            // Running Linux processes have the old hook mapped: write a new
+            // file and rename it over the old one instead of truncating it.
+            val staged = File(libDir, ".libsocket_hook.so.new")
+            srcHook.inputStream().use { input ->
+                staged.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            staged.setExecutable(true, false)
+            if (!staged.renameTo(destHook)) {
+                staged.delete()
+                Log.e(TAG, "Could not install socket hook at ${destHook.absolutePath}")
+                return
+            }
+            Log.i(TAG, "Copied prebuilt socket hook ${srcHook.name} to ${destHook.absolutePath}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to copy prebuilt socket hook: ${e.message}")
         }
     }
+
+    /** True when [hook] has this app's prefix compiled in as its NEW_PREFIX string. */
+    private fun hookMatchesPrefix(hook: File): Boolean = runCatching {
+        val needle = (prefixDir.absolutePath + "\u0000").toByteArray()
+        val bytes = hook.readBytes()
+        var index = 0
+        while (index <= bytes.size - needle.size) {
+            var match = true
+            for (offset in needle.indices) {
+                if (bytes[index + offset] != needle[offset]) { match = false; break }
+            }
+            if (match) return@runCatching true
+            index++
+        }
+        false
+    }.getOrDefault(false)
 
     private fun extractZip(zipFile: File, destDir: File) {
         destDir.mkdirs()
@@ -426,6 +475,7 @@ class LinuxRuntime(private val context: Context) {
             val dpkgBin = File(prefixDir, "bin/dpkg")
             val dpkgReal = File(prefixDir, "bin/dpkg.real")
             val relocateShebangs = File(prefixDir, "bin/droiddesk-relocate-shebangs")
+            val relocateDeb = File(prefixDir, "bin/droiddesk-relocate-deb")
 
             // Build a mini root tree so dpkg can use Termux-style paths internally
             // while the actual files land in our private prefix.
@@ -465,78 +515,20 @@ class LinuxRuntime(private val context: Context) {
             // Kotlin installation flow. Run this after every dpkg transaction so
             // newly unpacked commands and maintainer scripts never retain
             // Termux's original, inaccessible interpreter prefix.
-            relocateShebangs.writeText(
-                """
-                #!/system/bin/sh
-                old_prefix="/data/data/com.termux/files/usr"
-                new_prefix="${prefixDir.absolutePath}"
-                scan_marker="${'$'}1"
-                [ -f "${'$'}scan_marker" ] || exit 0
-                for root in \
-                    "${prefixDir.absolutePath}/bin" \
-                    "${prefixDir.absolutePath}/libexec" \
-                    "${prefixDir.absolutePath}/var/lib/dpkg/info"
-                do
-                    [ -d "${'$'}root" ] || continue
-                    "${prefixDir.absolutePath}/bin/find" "${'$'}root" \
-                        -type f -cnewer "${'$'}scan_marker" 2>/dev/null |
-                    while IFS= read -r file; do
-                        first_line=$("${prefixDir.absolutePath}/bin/head" -n 1 "${'$'}file" 2>/dev/null)
-                        case "${'$'}first_line" in
-                            "#!${'$'}old_prefix"*)
-                                "${prefixDir.absolutePath}/bin/sed" -i \
-                                    "1s|${'$'}old_prefix|${'$'}new_prefix|" "${'$'}file"
-                                ;;
-                        esac
-                    done
-                done
-                exit 0
-                """.trimIndent() + "\n",
-            )
+            relocateShebangs.writeText(RelocationScripts.relocateShebangs(prefixDir.absolutePath))
             relocateShebangs.setExecutable(true, false)
 
-            val wrapper = """
-                #!/system/bin/sh
-                export PATH="${prefixDir.absolutePath}/bin:${'$'}PATH"
-                export LD_LIBRARY_PATH="${prefixDir.absolutePath}/lib${'$'}{LD_LIBRARY_PATH:+:${'$'}LD_LIBRARY_PATH}"
-                export LD_PRELOAD="${prefixDir.absolutePath}/lib/libsocket_hook.so${'$'}{LD_PRELOAD:+:${'$'}LD_PRELOAD}"
-                # dpkg requires admindir to be inside root. Strip any caller-provided
-                # --root/--admindir (and their values) and prepend our own before any
-                # trailing filenames/apt separators so dpkg parses them as options.
-                caller_dir="${'$'}PWD"
-                args=""
-                while [ ${'$'}# -gt 0 ]; do
-                    case "${'$'}1" in
-                        --admindir=*|--root=*)
-                            ;;
-                        --admindir|--root)
-                            shift
-                            ;;
-                        *)
-                            arg="${'$'}1"
-                            case "${'$'}arg" in
-                                /*)
-                                    ;;
-                                *)
-                                    if [ -e "${'$'}caller_dir/${'$'}arg" ]; then
-                                        arg="${'$'}caller_dir/${'$'}arg"
-                                    fi
-                                    ;;
-                            esac
-                            args="${'$'}args ${'$'}arg"
-                            ;;
-                    esac
-                    shift
-                done
-                cd "${prefixDir.absolutePath}" || exit 1
-                scan_marker="${tmpDir.absolutePath}/dpkg-shebang-scan-${'$'}${'$'}"
-                : > "${'$'}scan_marker"
-                "${dpkgReal.absolutePath}" --force-not-root --force-script-chrootless --root="${dpkgRoot.absolutePath}" --admindir="${dpkgRoot.absolutePath}/var/lib/dpkg" ${'$'}args
-                status=${'$'}?
-                "${relocateShebangs.absolutePath}" "${'$'}scan_marker"
-                rm -f "${'$'}scan_marker"
-                exit ${'$'}status
-            """.trimIndent()
+            relocateDeb.writeText(RelocationScripts.relocateDeb(prefixDir.absolutePath, tmpDir.absolutePath))
+            relocateDeb.setExecutable(true, false)
+
+            val wrapper = RelocationScripts.dpkgWrapper(
+                prefix = prefixDir.absolutePath,
+                tmp = tmpDir.absolutePath,
+                dpkgReal = dpkgReal.absolutePath,
+                dpkgRoot = dpkgRoot.absolutePath,
+                relocateShebangs = relocateShebangs.absolutePath,
+                relocateDeb = relocateDeb.absolutePath,
+            )
 
             dpkgBin.writeText(wrapper)
             dpkgBin.setExecutable(true, false)
@@ -688,6 +680,12 @@ class LinuxRuntime(private val context: Context) {
 
                         val isScript = bytes.size >= 2 &&
                             bytes[0] == '#'.code.toByte() && bytes[1] == '!'.code.toByte()
+                        // Never rewrite ELF objects or other binary data as
+                        // text: decoding and re-encoding them corrupts them.
+                        val isElf = bytes.size >= 4 && bytes[0] == 0x7f.toByte() &&
+                            bytes[1] == 'E'.code.toByte() && bytes[2] == 'L'.code.toByte() &&
+                            bytes[3] == 'F'.code.toByte()
+                        if (isElf || bytes.contains(0.toByte())) return@forEach
                         val isPathConfig = file.extension.lowercase() in setOf(
                             "service", "desktop", "conf", "xml", "pc", "cmake",
                             "la", "prl", "sh", "pl", "py", "rb", "json", "ini",
@@ -1282,7 +1280,7 @@ class LinuxRuntime(private val context: Context) {
             !installOptionalPackages(listOf("c-ares"))) return false
 
         val workDir = File(tmpDir, "nodejs-relocated-deb")
-        workDir.deleteRecursively()
+        deleteTreeNoFollow(workDir)
         workDir.mkdirs()
 
         if (executeCommand("cd \"${workDir.absolutePath}\" && apt-get download nodejs")
@@ -1291,30 +1289,90 @@ class LinuxRuntime(private val context: Context) {
             ?.firstOrNull { it.name.startsWith("nodejs_") && it.extension == "deb" }
             ?: return false
         val unpacked = File(workDir, "unpacked")
-        if (executeCommand(
-                "dpkg-deb -R \"${sourceDeb.absolutePath}\" \"${unpacked.absolutePath}\""
-            ).startsWith("Error:")) return false
-
-        val oldPrefix = "/data/data/com.termux/files/usr"
-        val controlDir = File(unpacked, "DEBIAN")
-        controlDir.listFiles()?.filter { it.isFile }?.forEach { script ->
-            val content = script.readText()
-            if (content.contains(oldPrefix)) {
-                script.writeText(content.replace(oldPrefix, prefixDir.absolutePath))
-                script.setExecutable(true, false)
-            }
-        }
-
         val rebuiltDeb = File(workDir, "nodejs-relocated.deb")
-        if (executeCommand(
-                "dpkg-deb -b \"${unpacked.absolutePath}\" \"${rebuiltDeb.absolutePath}\""
-            ).startsWith("Error:")) return false
+        // libsocket_hook rewrites relative data/data/com.termux/... paths, so a
+        // hooked dpkg-deb extracts into the live prefix rather than [unpacked].
+        // Rebuild unhooked; the historical hooked commands remain the fallback.
+        fun rebuild(hooked: Boolean): Boolean {
+            val dpkgDeb = if (hooked) "dpkg-deb" else "env -u LD_PRELOAD dpkg-deb"
+            deleteTreeNoFollow(unpacked)
+            rebuiltDeb.delete()
+            if (executeCommand(
+                    "$dpkgDeb -R \"${sourceDeb.absolutePath}\" \"${unpacked.absolutePath}\""
+                ).startsWith("Error:")) return false
+            File(unpacked, "DEBIAN").apply {
+                // dpkg-deb -b requires 0755..0775; the app's umask is 077.
+                setReadable(true, false)
+                setExecutable(true, false)
+                relocateMaintainerScripts(this)
+            }
+            return !executeCommand(
+                "$dpkgDeb -b \"${unpacked.absolutePath}\" \"${rebuiltDeb.absolutePath}\""
+            ).startsWith("Error:")
+        }
+        if (!rebuild(hooked = false) && !rebuild(hooked = true)) return false
         if (executeCommand("dpkg --unpack \"${rebuiltDeb.absolutePath}\"")
                 .startsWith("Error:")) return false
 
         patchShebangs(force = true)
         if (executeCommand("dpkg --configure nodejs").startsWith("Error:")) return false
         return isDpkgPackageInstalled("nodejs")
+    }
+
+    /**
+     * Rewrites Termux's prefix in the text maintainer scripts of an unpacked
+     * package. conffiles/md5sums keep Termux's spelling: dpkg resolves those
+     * inside its relocated root. Binary files are left alone.
+     */
+    private fun relocateMaintainerScripts(controlDir: File) {
+        MAINTAINER_SCRIPTS.map { File(controlDir, it) }.filter { it.isFile }.forEach { script ->
+            if (looksBinary(script)) return@forEach
+            val content = script.readText()
+            if (content.contains(TERMUX_PREFIX)) {
+                script.writeText(content.replace(TERMUX_PREFIX, prefixDir.absolutePath))
+            }
+            script.setReadable(true, false)
+            script.setExecutable(true, false)
+        }
+    }
+
+    private fun looksBinary(file: File): Boolean = runCatching {
+        val head = ByteArray(512)
+        val count = file.inputStream().use { it.read(head) }
+        (0 until maxOf(count, 0)).any { head[it] == 0.toByte() }
+    }.getOrDefault(true)
+
+    /** Deletes a work tree without following symlinks out of it (unlike File.deleteRecursively). */
+    private fun deleteTreeNoFollow(root: File) {
+        val path = root.toPath()
+        if (!java.nio.file.Files.exists(path, java.nio.file.LinkOption.NOFOLLOW_LINKS)) return
+        runCatching {
+            java.nio.file.Files.walkFileTree(path, object : java.nio.file.SimpleFileVisitor<java.nio.file.Path>() {
+                override fun visitFile(
+                    file: java.nio.file.Path,
+                    attrs: java.nio.file.attribute.BasicFileAttributes,
+                ): java.nio.file.FileVisitResult {
+                    java.nio.file.Files.deleteIfExists(file)
+                    return java.nio.file.FileVisitResult.CONTINUE
+                }
+
+                override fun visitFileFailed(
+                    file: java.nio.file.Path,
+                    exc: java.io.IOException,
+                ): java.nio.file.FileVisitResult {
+                    runCatching { java.nio.file.Files.deleteIfExists(file) }
+                    return java.nio.file.FileVisitResult.CONTINUE
+                }
+
+                override fun postVisitDirectory(
+                    dir: java.nio.file.Path,
+                    exc: java.io.IOException?,
+                ): java.nio.file.FileVisitResult {
+                    runCatching { java.nio.file.Files.deleteIfExists(dir) }
+                    return java.nio.file.FileVisitResult.CONTINUE
+                }
+            })
+        }.onFailure { Log.w(TAG, "Could not remove ${root.absolutePath}", it) }
     }
 
     /** Installs only PRoot, proot-distro and Debian's base rootfs. */
@@ -2150,4 +2208,389 @@ class LinuxRuntime(private val context: Context) {
             }
         }
     }
+
+    // ── Termux control bridge (scripts/droiddeskctl) ──
+
+    /**
+     * Runs [command] with bash in the runtime environment for the control
+     * bridge. Unlike [executeCommand] it never becomes [activeCommandProcess]
+     * (so the in-app terminal cannot inject input into it), is bounded by
+     * [timeoutMs], streams output and returns the real exit code.
+     */
+    fun runControlCommand(
+        command: String,
+        timeoutMs: Long,
+        onOutput: (String) -> Unit = {},
+        isCancelled: () -> Boolean = { false },
+        workDir: File? = null,
+    ): ProcessRunner.Outcome {
+        if (!isBootstrapped()) {
+            val message = "Error: Runtime not bootstrapped\n"
+            runCatching { onOutput(message) }
+            return ProcessRunner.Outcome(ProcessRunner.EXIT_START_FAILED, false, false, 0, 0, message)
+        }
+        compileSocketHook()
+        val directory = workDir ?: homeDir.apply { mkdirs() }
+        return ProcessRunner(killTree = ::killProcessTree).run(
+            argv = listOf(File(binDir, "bash").absolutePath, "-c", command),
+            environment = getTermuxEnv(),
+            directory = directory,
+            timeoutMs = timeoutMs,
+            onOutput = onOutput,
+            isCancelled = isCancelled,
+        )
+    }
+
+    private fun killProcessTree(process: Process) {
+        val rootPid = processPid(process)
+        val descendants = rootPid?.let(::descendantPids).orEmpty()
+        descendants.asReversed().forEach { pid -> android.os.Process.sendSignal(pid, 15) }
+        rootPid?.let { android.os.Process.sendSignal(it, 15) } ?: process.destroy()
+        if (!process.waitFor(500, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+            descendants.asReversed().forEach { pid -> android.os.Process.sendSignal(pid, 9) }
+            process.destroyForcibly()
+        } else {
+            descendants.forEach { pid -> android.os.Process.sendSignal(pid, 9) }
+        }
+    }
+
+    /**
+     * Verifies a tool by running it, not by checking that a file exists:
+     * `node -v` must print vX.Y.Z and `npm -v` X.Y.Z with exit code 0.
+     */
+    fun toolStatus(tool: String): Map<String, Any?> {
+        val spec = ToolChecks.spec(tool)
+        if (!File(binDir, tool).exists()) {
+            return linkedMapOf("present" to false, "ok" to false, "version" to null, "exit" to null, "detail" to "not installed")
+        }
+        val outcome = runControlCommand(spec.command, spec.timeoutMs)
+        val verdict = ToolChecks.evaluate(tool, outcome.exitCode, outcome.tail)
+        return linkedMapOf(
+            "present" to true,
+            "ok" to verdict.ok,
+            "version" to verdict.version,
+            "exit" to outcome.exitCode,
+            "detail" to if (verdict.ok) null else outcome.tail.trim().takeLast(600),
+        )
+    }
+
+    /** dpkg's view of [packages]: "install ok installed <version>" or why not. */
+    fun dpkgPackageStates(packages: List<String>): Map<String, String> {
+        val outcome = runControlCommand(
+            "dpkg-query -W -f='\${Package}\\t\${Status}\\t\${Version}\\n' ${packages.joinToString(" ")} 2>/dev/null; true",
+            30_000,
+        )
+        return ToolChecks.parseDpkgStates(outcome.tail, packages)
+    }
+
+    private fun dpkgAudit(): Pair<Boolean, String> {
+        val outcome = runControlCommand("dpkg --audit 2>&1", 60_000)
+        val output = outcome.tail.trim()
+        return (outcome.exitCode == 0 && output.isEmpty()) to output
+    }
+
+    private fun socketHookStatus(): Map<String, Any?> {
+        val hook = File(prefixDir, "lib/libsocket_hook.so")
+        val jniDir = File(context.applicationInfo.nativeLibraryDir)
+        return linkedMapOf(
+            "path" to hook.absolutePath,
+            "present" to hook.isFile,
+            "matchesPrefix" to (hook.isFile && hookMatchesPrefix(hook)),
+            "variantShipped" to File(jniDir, "libsocket_hook_variant.so").isFile,
+            "variantMatchesPrefix" to File(jniDir, "libsocket_hook_variant.so").let { it.isFile && hookMatchesPrefix(it) },
+        )
+    }
+
+    /** Snapshot for `droiddeskctl status`. Node/npm are verified by running them. */
+    fun controlStatus(): Map<String, Any?> = linkedMapOf(
+        "package" to context.packageName,
+        "bootstrapped" to isBootstrapped(),
+        "desktop" to getInstalledDE().ifEmpty { null },
+        "sessionRunning" to isRunning(),
+        "graphics" to getGraphicsMode(),
+        "prefix" to prefixDir.absolutePath,
+        "home" to homeDir.absolutePath,
+        "socketHook" to socketHookStatus(),
+        "apps" to linkedMapOf(
+            "firefox" to File(binDir, "firefox").exists(),
+            "code_oss" to (File(binDir, "code-oss").exists() || File(binDir, "code").exists()),
+            "imagemagick" to (File(binDir, "magick").exists() || File(binDir, "convert").exists()),
+            "python3" to File(binDir, "python3").exists(),
+            "xclip" to File(binDir, "xclip").exists(),
+        ),
+        "node" to if (isBootstrapped()) toolStatus("node") else null,
+        "npm" to if (isBootstrapped()) toolStatus("npm") else null,
+        "dpkg" to if (isBootstrapped()) dpkgPackageStates(listOf("nodejs", "npm", "c-ares")) else null,
+    )
+
+    /** Runtime facts for `droiddeskctl shell-info`. */
+    fun shellInfo(): Map<String, Any?> {
+        val env = getTermuxEnv()
+        val bash = if (isBootstrapped()) {
+            runControlCommand("echo \"\$BASH_VERSION\"", 10_000).tail.trim()
+        } else null
+        return linkedMapOf(
+            "package" to context.packageName,
+            "uid" to android.os.Process.myUid(),
+            "filesDir" to baseDir.absolutePath,
+            "prefix" to prefixDir.absolutePath,
+            "home" to homeDir.absolutePath,
+            "tmp" to tmpDir.absolutePath,
+            "termuxPrefix" to TERMUX_PREFIX,
+            "bash" to bash,
+            "env" to listOf(
+                "PATH", "LD_LIBRARY_PATH", "LD_PRELOAD", "LANG", "LANGUAGE", "TMPDIR",
+                "SHELL", "DISPLAY", "TERMUX__PREFIX", "APT_CONFIG", "DPKG_ADMINDIR",
+            ).associateWith { env[it] },
+            "socketHook" to socketHookStatus(),
+            "dpkgWrapper" to File(prefixDir, "bin/dpkg.real").isFile,
+        )
+    }
+
+    /** Health checks for `droiddeskctl doctor`; each entry is check/ok/detail. */
+    fun doctor(): List<Map<String, Any?>> {
+        val checks = mutableListOf<Map<String, Any?>>()
+        fun check(name: String, ok: Boolean, detail: String? = null) {
+            checks += linkedMapOf("check" to name, "ok" to ok, "detail" to detail)
+        }
+        val bootstrapped = isBootstrapped()
+        check("bootstrap", bootstrapped, prefixDir.absolutePath)
+        check("desktop installed", getInstalledDE().isNotEmpty(), getInstalledDE().ifEmpty { "no DE marker" })
+        val hook = socketHookStatus()
+        check("libsocket_hook.so", hook["present"] == true && hook["matchesPrefix"] == true,
+            "present=${hook["present"]} matchesPrefix=${hook["matchesPrefix"]} variant=${hook["variantMatchesPrefix"]}")
+        val dpkgBin = File(prefixDir, "bin/dpkg")
+        check("dpkg wrapper", File(prefixDir, "bin/dpkg.real").isFile && !looksBinary(dpkgBin),
+            "dpkg.real=${File(prefixDir, "bin/dpkg.real").isFile}")
+        listOf("droiddesk-relocate-shebangs", "droiddesk-relocate-deb").forEach { helper ->
+            check(helper, File(binDir, helper).canExecute())
+        }
+        val dpkgRootLink = File(baseDir, "dpkgroot/data/data/com.termux/files/usr")
+        check("dpkgroot", runCatching { dpkgRootLink.canonicalPath == prefixDir.canonicalPath }.getOrDefault(false),
+            runCatching { dpkgRootLink.canonicalPath }.getOrNull())
+        check("apt config", File(prefixDir, "etc/apt/apt.conf.d/99-droiddesk-paths.conf").isFile)
+        val staleScripts = File(prefixDir, "var/lib/dpkg/info").listFiles { file ->
+            file.isFile && MAINTAINER_SCRIPTS.any { file.name.endsWith(".$it") } &&
+                !looksBinary(file) && runCatching { file.readText().contains(TERMUX_PREFIX) }.getOrDefault(false)
+        }.orEmpty()
+        check("maintainer scripts relocated", staleScripts.isEmpty(),
+            staleScripts.take(10).joinToString { it.name }.ifEmpty { null })
+        val staleShebangs = binDir.listFiles()?.filter { file ->
+            file.isFile && runCatching {
+                file.inputStream().use { input ->
+                    val head = ByteArray(TERMUX_PREFIX.length + 2)
+                    val count = input.read(head)
+                    count > 2 && String(head, 0, count).startsWith("#!$TERMUX_PREFIX")
+                }
+            }.getOrDefault(false)
+        }.orEmpty()
+        check("bin shebangs relocated", staleShebangs.isEmpty(),
+            staleShebangs.take(10).joinToString { it.name }.ifEmpty { null })
+        if (bootstrapped) {
+            val (auditOk, auditOutput) = dpkgAudit()
+            check("dpkg --audit", auditOk, auditOutput.take(1500).ifEmpty { null })
+            val node = toolStatus("node")
+            check("node -v", node["ok"] == true, (node["version"] ?: node["detail"])?.toString())
+            val npm = toolStatus("npm")
+            check("npm -v", npm["ok"] == true, (npm["version"] ?: npm["detail"])?.toString())
+        }
+        check("python3 (XFCE app launchers)", File(binDir, "python3").canExecute())
+        check("xclip (clipboard)", File(binDir, "xclip").canExecute())
+        val shared = File("/storage/emulated/0")
+        check("Android shared storage", shared.isDirectory && shared.canRead(), shared.absolutePath)
+        check("desktop session", true, if (isRunning()) "running" else "stopped")
+        return checks
+    }
+
+    /** Takes the process-wide package lock for [block]; null when another transaction runs. */
+    fun <T> withPackageLock(block: () -> T): T? {
+        if (!packageOperationRunning.compareAndSet(false, true)) return null
+        return try {
+            packageOperationCancelled = false
+            block()
+        } finally {
+            packageOperationRunning.set(false)
+        }
+    }
+
+    private fun packageProcessesRunning(): Boolean =
+        runControlCommand("pgrep -f '(^|/)(dpkg\\.real|apt-get|apt) ' >/dev/null", 10_000).exitCode == 0
+
+    /**
+     * Brings apt/dpkg back to a consistent state without reinstalling the
+     * runtime or upgrading anything: refreshes the wrappers, relocates every
+     * maintainer script and shebang, finishes interrupted configuration,
+     * repairs Node.js through [installRelocatedNodejs] and npm, then reports
+     * `dpkg --audit`, `node -v` and `npm -v`. Call under [withPackageLock].
+     */
+    fun repairPackages(onOutput: (String) -> Unit): Map<String, Any?> {
+        val steps = mutableListOf<Map<String, Any?>>()
+        fun say(text: String) = runCatching { onOutput(text) }
+        fun step(name: String, ok: Boolean, detail: String? = null) {
+            steps += linkedMapOf("step" to name, "ok" to ok, "detail" to detail)
+            say("${if (ok) "[ok]" else "[!!]"} $name${detail?.let { ": $it" } ?: ""}\n")
+        }
+        if (!isBootstrapped()) {
+            step("bootstrap", false, "runtime not bootstrapped; open DroidDesk to finish setup")
+            return linkedMapOf("ok" to false, "steps" to steps)
+        }
+        if (packageProcessesRunning()) {
+            step("no other apt/dpkg running", false, "another apt/dpkg process is active; try again later")
+            return linkedMapOf("ok" to false, "steps" to steps)
+        }
+
+        say("== Refreshing dpkg wrapper, relocation helpers and socket hook\n")
+        createAptConfigOverride()
+        ensureAptDirectories()
+        wrapDpkgForPath()
+        wrapUpdateAlternatives()
+        ensureSocketHookPrebuilt()
+        clearStalePackageLocks()
+        step("wrappers refreshed", File(binDir, "droiddesk-relocate-deb").canExecute())
+
+        say("== Relocating Termux paths in shebangs and maintainer scripts\n")
+        val relocate = runControlCommand("\"${File(binDir, "droiddesk-relocate-shebangs").absolutePath}\" --all", 600_000, onOutput)
+        patchShebangs(force = true)
+        step("relocation pass", relocate.exitCode == 0, "exit ${relocate.exitCode}")
+
+        say("== dpkg --configure -a\n")
+        val configure = runControlCommand("dpkg --configure -a", 900_000, onOutput)
+        step("dpkg --configure -a", configure.exitCode == 0, "exit ${configure.exitCode}")
+
+        val previousSink = installLogSink
+        installLogSink = { chunk -> say(chunk) }
+        try {
+            var states = dpkgPackageStates(listOf("nodejs", "npm"))
+            val nodeOk = toolStatus("node")["ok"] == true
+            val nodeKnown = states["nodejs"] != "not-installed"
+            if (nodeKnown && (!nodeOk || states["nodejs"].let { !ToolChecks.isInstalledOk(it) })) {
+                say("== Repairing Node.js with the relocated package\n")
+                step("nodejs (relocated reinstall)", installRelocatedNodejs())
+            }
+            states = dpkgPackageStates(listOf("nodejs", "npm"))
+            val npmKnown = states["npm"] != "not-installed"
+            if (npmKnown && (states["npm"].let { !ToolChecks.isInstalledOk(it) } || toolStatus("npm")["ok"] != true)) {
+                say("== Repairing npm\n")
+                val configured = runControlCommand("dpkg --configure npm", 600_000, onOutput).exitCode == 0
+                val npmFixed = (configured && toolStatus("npm")["ok"] == true) ||
+                    installOptionalPackages(listOf("npm"))
+                step("npm", npmFixed)
+            }
+
+            var (auditOk, auditOutput) = dpkgAudit()
+            if (!auditOk) {
+                say("== dpkg --audit reported problems; letting apt complete dependencies\n")
+                val fix = runControlCommand(
+                    "env DEBIAN_FRONTEND=noninteractive apt-get " +
+                        "-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold " +
+                        "--fix-broken install -y && dpkg --configure -a",
+                    1_800_000,
+                    onOutput,
+                )
+                step("apt-get --fix-broken install", fix.exitCode == 0, "exit ${fix.exitCode}")
+                dpkgAudit().let { auditOk = it.first; auditOutput = it.second }
+            }
+            step("dpkg --audit", auditOk, auditOutput.take(1500).ifEmpty { null })
+        } finally {
+            installLogSink = previousSink
+        }
+
+        patchShebangs(force = true)
+        val node = toolStatus("node")
+        val npm = toolStatus("npm")
+        val states = dpkgPackageStates(listOf("nodejs", "npm"))
+        val audit = dpkgAudit()
+        return linkedMapOf(
+            "ok" to (audit.first && steps.none { it["ok"] == false && it["step"] != "dpkg --configure -a" }),
+            "steps" to steps,
+            "node" to node,
+            "npm" to npm,
+            "dpkg" to states,
+            "dpkgAudit" to audit.second.ifEmpty { null },
+        )
+    }
+
+    /**
+     * Makes `node -v` and `npm -v` work, using DroidDesk's relocated Node.js
+     * flow (never a bare `pkg install nodejs`). Call under [withPackageLock].
+     */
+    fun ensureNodeToolchain(onOutput: (String) -> Unit): Boolean {
+        fun say(text: String) = runCatching { onOutput(text) }
+        if (!isBootstrapped()) {
+            say("Runtime not bootstrapped; open DroidDesk to finish setup first.\n")
+            return false
+        }
+        if (toolStatus("node")["ok"] == true && toolStatus("npm")["ok"] == true &&
+            dpkgPackageStates(listOf("nodejs", "npm")).values.all(ToolChecks::isInstalledOk)) {
+            say("Node.js and npm are already installed and working.\n")
+            return true
+        }
+        val previousSink = installLogSink
+        installLogSink = { chunk -> say(chunk) }
+        try {
+            wrapDpkgForPath()
+            clearStalePackageLocks()
+            say("== Finishing interrupted dpkg configuration\n")
+            installPackageGroup("dpkg --configure -a")
+            val nodeState = dpkgPackageStates(listOf("nodejs"))["nodejs"].orEmpty()
+            if (toolStatus("node")["ok"] != true || !ToolChecks.isInstalledOk(nodeState)) {
+                say("== Installing Node.js (relocated package)\n")
+                if (!installRelocatedNodejs()) {
+                    say("Relocated Node.js installation failed.\n")
+                    return false
+                }
+            }
+            if (toolStatus("npm")["ok"] != true ||
+                dpkgPackageStates(listOf("npm"))["npm"].let { !ToolChecks.isInstalledOk(it) }) {
+                say("== Installing npm\n")
+                if (!installOptionalPackages(listOf("npm"))) {
+                    say("npm installation failed.\n")
+                    return false
+                }
+            }
+            patchShebangs(force = true)
+        } finally {
+            installLogSink = previousSink
+        }
+        val node = toolStatus("node")
+        val npm = toolStatus("npm")
+        say("node -v: ${node["version"] ?: "FAILED (${node["detail"]})"}\n")
+        say("npm -v: ${npm["version"] ?: "FAILED (${npm["detail"]})"}\n")
+        return node["ok"] == true && npm["ok"] == true
+    }
+
+    /** `droiddeskctl install <app>`; verifies the result by running/querying it. Call under [withPackageLock]. */
+    fun installForControl(appId: String, onOutput: (String) -> Unit): Map<String, Any?> {
+        fun say(text: String) = runCatching { onOutput(text) }
+        if (appId == "nodejs") {
+            val ok = ensureNodeToolchain(onOutput)
+            return linkedMapOf("ok" to ok, "node" to toolStatus("node"), "npm" to toolStatus("npm"),
+                "dpkgAudit" to dpkgAudit().second.ifEmpty { null })
+        }
+        if (appId == "code_oss" && !ensureNodeToolchain(onOutput)) {
+            return linkedMapOf("ok" to false, "reason" to "Node.js/npm could not be prepared")
+        }
+        if (getInstalledDE().isEmpty()) {
+            say("The Linux desktop is not installed yet; finish setup in DroidDesk first.\n")
+            return linkedMapOf("ok" to false, "reason" to "desktop not installed")
+        }
+        val previousSink = installLogSink
+        installLogSink = { chunk -> say(chunk) }
+        val installed = try {
+            installOptionalApp(appId) { progress, status ->
+                if (progress >= 0) say("[${(progress * 100).toInt()}%] $status\n") else say("[!!] $status\n")
+            }
+        } finally {
+            installLogSink = previousSink
+        }
+        val packageName = when (appId) {
+            "code_oss" -> "code-oss"
+            else -> appId
+        }
+        val state = dpkgPackageStates(listOf(packageName))[packageName].orEmpty()
+        val verified = installed && ToolChecks.isInstalledOk(state)
+        return linkedMapOf("ok" to verified, "dpkg" to mapOf(packageName to state),
+            "dpkgAudit" to dpkgAudit().second.ifEmpty { null })
+    }
+
 }

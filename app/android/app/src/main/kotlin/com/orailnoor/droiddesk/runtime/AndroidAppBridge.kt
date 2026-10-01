@@ -11,9 +11,11 @@ import android.net.LocalSocket
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
+import com.orailnoor.droiddesk.runtime.control.PeerPolicy
 import java.io.File
 import kotlin.concurrent.thread
 
@@ -84,6 +86,8 @@ object AndroidAppBridge {
     private fun socketName(context: Context): String =
         if (context.packageName == ORIGINAL_PACKAGE) SOCKET_NAME
         else "${context.packageName}.android-app-launcher"
+
+    fun isRunning(): Boolean = server != null
 
     fun stop() {
         synchronized(this) {
@@ -410,6 +414,14 @@ object AndroidAppBridge {
             var client: LocalSocket? = null
             try {
                 client = socket.accept()
+                // Abstract socket names are reachable by any app on the device:
+                // only accept this app's own Linux processes (and root, used by
+                // rooted chroot sessions).
+                val peerUid = runCatching { client.peerCredentials.uid }.getOrNull()
+                if (peerUid == null || !PeerPolicy.isAuthorizedLauncherPeer(peerUid, Process.myUid())) {
+                    Log.w(TAG, "Rejected Android app launcher request from uid $peerUid")
+                    continue
+                }
                 val command = client.inputStream.bufferedReader().readLine()?.trim().orEmpty()
                 if (command.startsWith("action:")) {
                     launchSystemAction(context, command.removePrefix("action:"))
@@ -446,6 +458,22 @@ object AndroidAppBridge {
             Toast.makeText(context, message, Toast.LENGTH_LONG).show()
         }
     }
+
+    /**
+     * The launcher activity of [packageName] as "package/class", if it is an
+     * installed launcher app. Used by the Termux control bridge, which starts
+     * it with `am start` from Termux (the app in the foreground).
+     */
+    fun launcherComponent(context: Context, packageName: String): String? =
+        launcherActivities(context)
+            .firstOrNull { it.activityInfo.packageName == packageName }
+            ?.let { "${it.activityInfo.packageName}/${it.activityInfo.name}" }
+
+    /** The emergency "return to Samsung Home" launcher component, if installed. */
+    fun stockLauncherComponent(context: Context): String? =
+        listOf("com.sec.android.app.launcher", "com.android.launcher3").firstNotNullOfOrNull { pkg ->
+            context.packageManager.getLaunchIntentForPackage(pkg)?.component?.flattenToString()
+        }
 
     fun launchSystemAction(context: Context, action: String) {
         val settingsAction = when (action) {

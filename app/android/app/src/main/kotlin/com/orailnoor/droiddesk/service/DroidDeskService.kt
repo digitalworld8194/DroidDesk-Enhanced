@@ -16,6 +16,7 @@ import androidx.core.app.ServiceCompat
 import com.orailnoor.droiddesk.MainActivity
 import com.orailnoor.droiddesk.runtime.AndroidAppBridge
 import com.orailnoor.droiddesk.runtime.ChrootRuntime
+import com.orailnoor.droiddesk.runtime.ControlBridge
 import com.orailnoor.droiddesk.view.DesktopActivity
 import kotlin.concurrent.thread
 
@@ -32,6 +33,7 @@ class DroidDeskService : Service() {
         const val CHANNEL_ID = "droiddesk_service"
         const val NOTIFICATION_ID = 1001
         const val ACTION_STOP = "com.orailnoor.droiddesk.ACTION_STOP"
+        private const val CONTROL_OWNER = "DroidDeskService"
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
@@ -39,6 +41,8 @@ class DroidDeskService : Service() {
     override fun onCreate() {
         super.onCreate()
         AndroidAppBridge.start(this)
+        // Termux control bridge (droiddeskctl) stays reachable while the desktop runs.
+        ControlBridge.acquire(this, CONTROL_OWNER)
         createNotificationChannel()
         acquireWakeLock()
     }
@@ -81,6 +85,7 @@ class DroidDeskService : Service() {
 
     override fun onDestroy() {
         AndroidAppBridge.stop()
+        ControlBridge.release(CONTROL_OWNER)
         releaseWakeLock()
         super.onDestroy()
     }

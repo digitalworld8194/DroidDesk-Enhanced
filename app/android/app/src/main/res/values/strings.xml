@@ -148,4 +148,13 @@
     <string name="progress_removal_cancelled">Desinstalación cancelada</string>
     <string name="progress_package_removed">%1$s desinstalado</string>
     <string name="progress_package_removal_failed">La desinstalación de %1$s falló</string>
+
+    <!-- Control desde Termux (scripts/droiddeskctl, ControlBridge) -->
+    <string name="control_channel_name">Control desde Termux</string>
+    <string name="control_channel_description">Códigos para vincular Termux con DroidDesk</string>
+    <string name="control_pair_title">Vincular Termux con DroidDesk</string>
+    <string name="control_pair_text">Código: %1$s. Escríbelo en Termux (droiddeskctl pair). Caduca en %2$d s. Si no lo pediste tú, ignóralo.</string>
+    <string name="control_pair_toast">DroidDesk: código de vinculación %1$s</string>
+    <string name="control_paired">Termux quedó vinculado con DroidDesk</string>
+    <string name="control_revoked">Se revocó el acceso de Termux a DroidDesk</string>
 </resources>

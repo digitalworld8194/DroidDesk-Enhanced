@@ -100,10 +100,19 @@ class DesktopActivity : Activity() {
 
     companion object {
         private const val TAG = "DesktopActivity"
+
+        @Volatile private var active: java.lang.ref.WeakReference<DesktopActivity>? = null
+
+        /** Closes the visible desktop, e.g. after Termux stopped the session (droiddeskctl). */
+        fun finishActive() {
+            val activity = active?.get() ?: return
+            activity.runOnUiThread { if (!activity.isFinishing) activity.finish() }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        active = java.lang.ref.WeakReference(this)
         linuxRuntime = LinuxRuntime(this)
         chrootRuntime = ChrootRuntime(this)
         shouldStartSession = intent.getBooleanExtra("startSession", false)
@@ -712,6 +721,7 @@ class DesktopActivity : Activity() {
         inputController = null
         x11ServiceClient?.disconnect()
         x11ServiceClient = null
+        if (active?.get() === this) active = null
         super.onDestroy()
     }
 }

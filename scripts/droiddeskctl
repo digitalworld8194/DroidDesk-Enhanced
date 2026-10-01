@@ -1,0 +1,627 @@
+#!/usr/bin/env python3
+"""droiddeskctl: control DroidDesk's private Linux runtime from normal Termux.
+
+Termux is the control centre; DroidDesk stays the visual PC desktop. This
+client talks to DroidDesk's ControlBridge on 127.0.0.1 only, authenticated
+with a 256-bit token obtained by pairing (see CONTROL_BRIDGE.md).
+
+Usage: droiddeskctl [options] <command> [args]
+
+Commands:
+  pair                      pair with DroidDesk (code shown on the phone)
+  unpair                    revoke the token in DroidDesk and delete it here
+  ping                      check that DroidDesk answers (no token needed)
+  status                    runtime, desktop, socket hook, real node/npm state
+  doctor                    full health check (also checks this client)
+  shell-info                runtime paths and environment
+  logs [app|audit] [N]      DroidDesk's Android log or the control audit log
+  open                      open DroidDesk's main screen
+  start-desktop             open the Linux desktop (starts the session if needed)
+  stop-desktop              stop the Linux desktop session
+  restart-desktop           stop, then start the desktop again
+  launch <package>          open an Android app (validated by DroidDesk)
+  settings <action>         wifi bluetooth display sound hotspot battery
+                            home_settings settings samsung_home
+  exec -- <command...>      run a shell command inside DroidDesk's runtime
+  node|npm|npx <args...>    run Node tools inside DroidDesk's runtime
+  install <app>             nodejs code_oss firefox imagemagick (DroidDesk's own flow)
+  repair-packages           repair dpkg/apt state, Node.js and npm (no upgrades)
+  sync-apps                 refresh Android app launchers and the XFCE dock
+  sync-storage              refresh the Android storage links in the Linux home
+
+Options:
+  --package PKG   DroidDesk package (default com.orailnoor.droiddesk.preview,
+                  or $DROIDDESK_PACKAGE)
+  --port N        control port (default derived from the package)
+  --timeout S     command timeout in seconds (exec default 300)
+  --force         allow upgrades/removals that are blocked by default
+  --json          print the raw JSON result
+"""
+import hashlib
+import hmac
+import json
+import os
+import secrets
+import shlex
+import socket
+import stat
+import subprocess
+import sys
+import time
+
+DEFAULT_PACKAGE = "com.orailnoor.droiddesk.preview"
+ORIGINAL_PACKAGE = "com.orailnoor.droiddesk"
+MAIN_ACTIVITY = "com.orailnoor.droiddesk.MainActivity"
+HOST = "127.0.0.1"
+BASE_PORT = 47820
+PROTOCOL = 1
+
+EXIT_UNAVAILABLE = 69
+EXIT_PROTOCOL = 76
+EXIT_NOPERM = 77
+EXIT_TEMPFAIL = 75
+EXIT_USAGE = 64
+
+NO_TOKEN_ACTIONS = {"ping", "pair", "pair-confirm"}
+# Mirrors ExecPolicy on the DroidDesk side; checked here too so a mistyped
+# command never even reaches the runtime without --force.
+FORCE_PATTERNS = (
+    ("upgrade", "mass upgrades require --force"),
+    ("full-upgrade", "mass upgrades require --force"),
+    ("dist-upgrade", "mass upgrades require --force"),
+    ("autoremove", "removing packages requires --force"),
+    ("purge", "removing packages requires --force"),
+)
+
+
+class CtlError(Exception):
+    def __init__(self, message, code=1):
+        super().__init__(message)
+        self.code = code
+
+
+def port_for(package):
+    if package == ORIGINAL_PACKAGE:
+        return BASE_PORT
+    if package == DEFAULT_PACKAGE:
+        return BASE_PORT + 1
+    return BASE_PORT + 2
+
+
+def config_dir():
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.path.expanduser("~"), ".config")
+    return os.path.join(base, "droiddesk")
+
+
+def token_path(package):
+    name = "token" if package == DEFAULT_PACKAGE else f"token-{package}"
+    return os.path.join(config_dir(), name)
+
+
+def read_token(package):
+    path = token_path(package)
+    try:
+        info = os.stat(path)
+    except FileNotFoundError:
+        raise CtlError(f"No hay token en {path}. Ejecuta: droiddeskctl pair", EXIT_NOPERM)
+    if stat.S_IMODE(info.st_mode) & 0o077:
+        os.chmod(path, 0o600)
+        print(f"aviso: {path} tenía permisos abiertos; corregido a 600", file=sys.stderr)
+    with open(path) as handle:
+        token = handle.read().strip()
+    if len(token) != 64 or any(c not in "0123456789abcdef" for c in token):
+        raise CtlError(f"Token inválido en {path}. Ejecuta: droiddeskctl pair", EXIT_NOPERM)
+    return token
+
+
+def write_token(package, token):
+    directory = config_dir()
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    os.chmod(directory, 0o700)
+    path = token_path(package)
+    temporary = path + ".tmp"
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as handle:
+        handle.write(token + "\n")
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+    return path
+
+
+def server_proof(token, nonce, action):
+    key = hashlib.sha256(token.encode()).digest()
+    message = f"droiddesk-ctl-server|{nonce}|{action}".encode()
+    return hmac.new(key, message, hashlib.sha256).hexdigest()
+
+
+class Client:
+    def __init__(self, package, port, timeout=None, force=False):
+        self.package = package
+        self.port = port
+        self.timeout = timeout
+        self.force = force
+
+    def call(self, action, args=(), on_output=None, timeout=None):
+        """Sends one request; streams 'out' frames to on_output; returns the result frame."""
+        token = None if action in NO_TOKEN_ACTIONS else read_token(self.package)
+        nonce = secrets.token_hex(16)
+        request = {"v": PROTOCOL, "action": action, "args": list(args), "force": self.force, "nonce": nonce}
+        effective_timeout = timeout or self.timeout
+        if effective_timeout:
+            request["timeout"] = int(effective_timeout)
+        try:
+            sock = socket.create_connection((HOST, self.port), timeout=5)
+        except (ConnectionRefusedError, socket.timeout, OSError) as error:
+            raise CtlError(
+                f"DroidDesk ({self.package}) no responde en {HOST}:{self.port} ({error}).\n"
+                "Abre DroidDesk (droiddeskctl open) y vuelve a intentarlo.",
+                EXIT_UNAVAILABLE,
+            )
+        with sock:
+            reader = sock.makefile("r", encoding="utf-8", newline="\n")
+            sock.sendall((json.dumps(request) + "\n").encode())
+            if token is not None:
+                sock.settimeout(30)
+                frame = self._read_frame(reader)
+                if frame.get("type") == "error":
+                    self._raise(frame)
+                expected = server_proof(token, nonce, action)
+                if frame.get("type") != "challenge" or not hmac.compare_digest(
+                    str(frame.get("proof", "")), expected
+                ):
+                    raise CtlError(
+                        "El servidor en el puerto de control no demostró ser DroidDesk; "
+                        "no se envió el token.",
+                        EXIT_PROTOCOL,
+                    )
+                sock.sendall((json.dumps({"token": token}) + "\n").encode())
+            sock.settimeout(None)
+            while True:
+                frame = self._read_frame(reader)
+                kind = frame.get("type")
+                if kind == "out":
+                    if on_output:
+                        on_output(frame.get("data", ""))
+                elif kind == "result":
+                    return frame
+                elif kind == "error":
+                    self._raise(frame)
+                else:
+                    raise CtlError(f"Respuesta inesperada: {frame}", EXIT_PROTOCOL)
+
+    @staticmethod
+    def _read_frame(reader):
+        line = reader.readline()
+        if not line:
+            raise CtlError("DroidDesk cerró la conexión sin respuesta", EXIT_PROTOCOL)
+        try:
+            return json.loads(line)
+        except ValueError:
+            raise CtlError(f"Respuesta no válida: {line[:200]!r}", EXIT_PROTOCOL)
+
+    @staticmethod
+    def _raise(frame):
+        code = frame.get("code", "error")
+        exit_code = {
+            "unauthorized": EXIT_NOPERM,
+            "not_paired": EXIT_NOPERM,
+            "busy": EXIT_TEMPFAIL,
+            "unknown_action": EXIT_USAGE,
+            "bad_args": EXIT_USAGE,
+            "bad_request": EXIT_USAGE,
+        }.get(code, 1)
+        raise CtlError(f"{code}: {frame.get('message', '')}", exit_code)
+
+
+# ── Output helpers ──
+
+def stream(text):
+    sys.stdout.write(text)
+    sys.stdout.flush()
+
+
+def mark(ok):
+    return "✓" if ok else "✗"
+
+
+def human(value):
+    if isinstance(value, bool):
+        return "sí" if value else "no"
+    return value
+
+
+def print_json(value):
+    print(json.dumps(value, indent=2, ensure_ascii=False))
+
+
+def am_start(*args):
+    """Starts an activity from Termux (the foreground app may start activities)."""
+    command = ["am", "start", *args]
+    try:
+        completed = subprocess.run(command, capture_output=True, text=True, timeout=30)
+    except FileNotFoundError:
+        raise CtlError("No se encontró 'am' en Termux (pkg install termux-am)", EXIT_UNAVAILABLE)
+    output = (completed.stdout + completed.stderr).strip()
+    if completed.returncode != 0 or "Error" in output:
+        raise CtlError(f"am start falló: {output}", 1)
+    return output
+
+
+def result_exit(result):
+    exit_code = result.get("exit", 0 if result.get("ok") else 1)
+    return int(exit_code) if isinstance(exit_code, int) else (0 if result.get("ok") else 1)
+
+
+# ── Commands ──
+
+def cmd_pair(client, args, options):
+    code = None
+    if args[:1] == ["--code"] and len(args) == 2:
+        code = args[1]
+    result = client.call("pair")
+    if not result.get("ok"):
+        data = result.get("data") or {}
+        raise CtlError(
+            f"DroidDesk rechazó la vinculación ({data.get('reason')}); "
+            f"reintenta en {data.get('retryAfterSec', '?')} s",
+            EXIT_TEMPFAIL,
+        )
+    expires = (result.get("data") or {}).get("expiresInSec", 120)
+    if code is None:
+        print(f"DroidDesk muestra un código de 6 dígitos (notificación). Caduca en {expires} s.")
+        try:
+            code = input("Código: ").strip()
+        except EOFError:
+            raise CtlError("Sin código", EXIT_USAGE)
+    result = client.call("pair-confirm", [code])
+    if not result.get("ok"):
+        raise CtlError(f"Vinculación fallida: {(result.get('data') or {}).get('reason')}", EXIT_NOPERM)
+    path = write_token(client.package, result["data"]["token"])
+    info = client.call("shell-info")
+    print(f"Vinculado con {info['data'].get('package')} (uid {info['data'].get('uid')}). Token en {path} (600).")
+    return 0
+
+
+def cmd_unpair(client, args, options):
+    client.call("revoke")
+    path = token_path(client.package)
+    if os.path.exists(path):
+        os.remove(path)
+    print("Token revocado en DroidDesk y eliminado de Termux.")
+    return 0
+
+
+def cmd_ping(client, args, options):
+    result = client.call("ping")
+    if options["json"]:
+        print_json(result.get("data"))
+    else:
+        data = result.get("data") or {}
+        print(f"{data.get('package')} responde (protocolo {data.get('protocol')}, vinculado: {human(data.get('paired'))})")
+    return 0
+
+
+def tool_line(name, info):
+    if not info:
+        return f"  {name:<6} desconocido"
+    if info.get("ok"):
+        return f"  {name:<6} {mark(True)} {info.get('version')}"
+    detail = info.get("detail") or ""
+    detail = detail.strip().splitlines()[-1] if detail.strip() else ""
+    return f"  {name:<6} {mark(False)} exit={info.get('exit')} {detail}"
+
+
+def cmd_status(client, args, options):
+    result = client.call("status")
+    data = result.get("data") or {}
+    if options["json"]:
+        print_json(data)
+        return 0
+    hook = data.get("socketHook") or {}
+    bridge = data.get("controlBridge") or {}
+    print(f"DroidDesk {data.get('package')}")
+    print(f"  runtime     {mark(data.get('bootstrapped'))} {data.get('prefix')}")
+    print(f"  escritorio  {data.get('desktop') or 'no instalado'} · sesión "
+          f"{'en ejecución' if data.get('sessionRunning') else 'detenida'} · {data.get('graphics')}")
+    print(f"  hook        {mark(hook.get('present') and hook.get('matchesPrefix'))} "
+          f"libsocket_hook.so (variante del APK {mark(hook.get('variantMatchesPrefix'))})")
+    print(tool_line("node", data.get("node")))
+    print(tool_line("npm", data.get("npm")))
+    for name, state in (data.get("dpkg") or {}).items():
+        print(f"  dpkg        {name}: {state}")
+    apps = data.get("apps") or {}
+    print("  apps        " + " ".join(f"{k}{mark(v)}" for k, v in apps.items()))
+    print(f"  control     {bridge.get('address')}:{bridge.get('port')} · auditoría {bridge.get('auditLog')}")
+    return 0
+
+
+def local_checks(client):
+    checks = []
+    path = token_path(client.package)
+    if os.path.exists(path):
+        mode = stat.S_IMODE(os.stat(path).st_mode)
+        checks.append(("token de Termux (600)", mode == 0o600, f"{path} {oct(mode)}"))
+    else:
+        checks.append(("token de Termux", False, f"falta {path}: droiddeskctl pair"))
+    checks.append(("am (Termux)", subprocess.run(["sh", "-c", "command -v am"],
+                                                 capture_output=True).returncode == 0, None))
+    return checks
+
+
+def cmd_doctor(client, args, options):
+    checks = local_checks(client)
+    remote = []
+    ok = all(c[1] for c in checks)
+    try:
+        result = client.call("doctor")
+        remote = (result.get("data") or {}).get("checks", [])
+        ok = ok and result.get("ok", False)
+    except CtlError as error:
+        checks.append(("conexión con DroidDesk", False, str(error)))
+        ok = False
+    if options["json"]:
+        print_json({"local": [dict(check=c, ok=o, detail=d) for c, o, d in checks], "droiddesk": remote})
+        return 0 if ok else 1
+    print("Termux:")
+    for name, passed, detail in checks:
+        print(f"  {mark(passed)} {name}" + (f" — {detail}" if detail else ""))
+    if remote:
+        print("DroidDesk:")
+        for check in remote:
+            detail = check.get("detail")
+            print(f"  {mark(check.get('ok'))} {check.get('check')}" + (f" — {detail}" if detail else ""))
+    print("Resultado:", "todo correcto" if ok else "hay problemas")
+    return 0 if ok else 1
+
+
+def cmd_shell_info(client, args, options):
+    result = client.call("shell-info")
+    print_json(result.get("data"))
+    return 0
+
+
+def cmd_logs(client, args, options):
+    result = client.call("logs", args, on_output=stream)
+    return result_exit(result)
+
+
+def cmd_open(client, args, options):
+    am_start("-n", f"{client.package}/{MAIN_ACTIVITY}")
+    print("DroidDesk abierto.")
+    return 0
+
+
+def cmd_start_desktop(client, args, options):
+    # The HOME intent makes MainActivity open DesktopActivity and start the
+    # session when it is not running (MainActivity.handleHomeLaunch).
+    am_start("-a", "android.intent.action.MAIN", "-c", "android.intent.category.HOME",
+             "-n", f"{client.package}/{MAIN_ACTIVITY}")
+    print("Escritorio de DroidDesk solicitado.")
+    return 0
+
+
+def cmd_stop_desktop(client, args, options):
+    result = client.call("stop-desktop")
+    print("Escritorio detenido." if result.get("ok") else "No se pudo detener el escritorio.")
+    return result_exit(result)
+
+
+def cmd_restart_desktop(client, args, options):
+    code = cmd_stop_desktop(client, args, options)
+    if code != 0:
+        return code
+    time.sleep(2)
+    return cmd_start_desktop(client, args, options)
+
+
+def cmd_launch(client, args, options):
+    if len(args) != 1:
+        raise CtlError("uso: droiddeskctl launch <paquete>", EXIT_USAGE)
+    result = client.call("launch", args)
+    if not result.get("ok"):
+        raise CtlError((result.get("data") or {}).get("reason", "no se pudo abrir"), 1)
+    am_start("-n", result["data"]["component"])
+    print(f"Abierto {args[0]}")
+    return 0
+
+
+def cmd_settings(client, args, options):
+    if len(args) != 1:
+        raise CtlError("uso: droiddeskctl settings <acción>", EXIT_USAGE)
+    result = client.call("settings", args)
+    data = result.get("data") or {}
+    if not result.get("ok"):
+        raise CtlError(data.get("reason", "acción no válida"), 1)
+    if "component" in data:
+        am_start("-n", data["component"])
+    else:
+        am_start("-a", data["intentAction"])
+    print(f"Ajustes abiertos: {args[0]}")
+    return 0
+
+
+def check_force(command_text, force):
+    if force:
+        return
+    words = shlex.split(command_text, posix=True) if command_text else []
+    managers = {"apt", "apt-get", "pkg", "dpkg"}
+    if any(w in managers for w in words):
+        for pattern, reason in FORCE_PATTERNS:
+            if pattern in words:
+                raise CtlError(f"{reason} (añade --force si de verdad lo quieres)", EXIT_USAGE)
+
+
+def run_streaming(client, action, args):
+    result = client.call(action, args, on_output=stream)
+    data = result.get("data") or {}
+    if not result.get("ok") and data.get("reason"):
+        print(f"\ndroiddeskctl: {data['reason']}" + (" (usa --force)" if data.get("hint") else ""),
+              file=sys.stderr)
+    if data.get("timedOut"):
+        print(f"\ndroiddeskctl: tiempo agotado tras {data.get('durationMs', 0) // 1000} s", file=sys.stderr)
+    return result_exit(result)
+
+
+def cmd_exec(client, args, options):
+    if args[:1] == ["--"]:
+        args = args[1:]
+    if not args:
+        raise CtlError("uso: droiddeskctl exec -- <comando>", EXIT_USAGE)
+    command = args[0] if len(args) == 1 else " ".join(shlex.quote(a) for a in args)
+    try:
+        check_force(command, client.force)
+    except ValueError:
+        pass  # unbalanced quotes: the runtime's bash will report it
+    return run_streaming(client, "exec", [command])
+
+
+def node_tool(name):
+    def command(client, args, options):
+        return run_streaming(client, name, args)
+    return command
+
+
+def cmd_install(client, args, options):
+    if len(args) != 1:
+        raise CtlError("uso: droiddeskctl install <nodejs|code_oss|firefox|imagemagick>", EXIT_USAGE)
+    result = client.call("install", args, on_output=stream)
+    if options["json"]:
+        print_json(result.get("data"))
+    else:
+        data = result.get("data") or {}
+        for tool in ("node", "npm"):
+            if tool in data:
+                print(tool_line(tool, data[tool]))
+        if data.get("dpkgAudit"):
+            print("dpkg --audit:\n" + data["dpkgAudit"])
+        if data.get("reason"):
+            print(f"droiddeskctl: {data['reason']}", file=sys.stderr)
+        print("Instalación verificada." if result.get("ok") else "La instalación NO quedó verificada.")
+    return 0 if result.get("ok") else 1
+
+
+def cmd_repair(client, args, options):
+    result = client.call("repair-packages", on_output=stream)
+    data = result.get("data") or {}
+    if options["json"]:
+        print_json(data)
+    else:
+        print()
+        print(tool_line("node", data.get("node")))
+        print(tool_line("npm", data.get("npm")))
+        print("dpkg --audit:", "limpio" if not data.get("dpkgAudit") else "\n" + data["dpkgAudit"])
+        if data.get("reason"):
+            print(f"droiddeskctl: {data['reason']}", file=sys.stderr)
+        print("Reparación completa." if result.get("ok") else "Quedan problemas (revisa la salida).")
+    return 0 if result.get("ok") else 1
+
+
+def cmd_simple(action, success):
+    def command(client, args, options):
+        result = client.call(action, on_output=stream)
+        if options["json"]:
+            print_json(result.get("data"))
+        else:
+            print(success if result.get("ok") else f"{action} falló")
+            data = result.get("data") or {}
+            for key, value in data.items():
+                if isinstance(value, dict):
+                    for name, state in value.items():
+                        print(f"  {name}: {human(state)}")
+                else:
+                    print(f"  {key}: {human(value)}")
+        return 0 if result.get("ok") else 1
+    return command
+
+
+COMMANDS = {
+    "pair": cmd_pair,
+    "unpair": cmd_unpair,
+    "revoke": cmd_unpair,
+    "ping": cmd_ping,
+    "status": cmd_status,
+    "doctor": cmd_doctor,
+    "shell-info": cmd_shell_info,
+    "logs": cmd_logs,
+    "open": cmd_open,
+    "start-desktop": cmd_start_desktop,
+    "stop-desktop": cmd_stop_desktop,
+    "restart-desktop": cmd_restart_desktop,
+    "launch": cmd_launch,
+    "settings": cmd_settings,
+    "exec": cmd_exec,
+    "node": node_tool("node"),
+    "npm": node_tool("npm"),
+    "npx": node_tool("npx"),
+    "install": cmd_install,
+    "repair-packages": cmd_repair,
+    "sync-apps": cmd_simple("sync-apps", "Lanzadores de Android sincronizados."),
+    "sync-storage": cmd_simple("sync-storage", "Almacenamiento de Android enlazado."),
+}
+
+
+def parse_options(argv):
+    options = {
+        "package": os.environ.get("DROIDDESK_PACKAGE", DEFAULT_PACKAGE),
+        "port": None,
+        "timeout": None,
+        "force": False,
+        "json": False,
+    }
+    index = 0
+    while index < len(argv) and argv[index].startswith("--"):
+        flag = argv[index]
+        if flag in ("--package", "--port", "--timeout"):
+            if index + 1 >= len(argv):
+                raise CtlError(f"{flag} necesita un valor", EXIT_USAGE)
+            value = argv[index + 1]
+            key = flag[2:]
+            options[key] = int(value) if key in ("port", "timeout") else value
+            index += 2
+        elif flag == "--force":
+            options["force"] = True
+            index += 1
+        elif flag == "--json":
+            options["json"] = True
+            index += 1
+        elif flag in ("--help", "-h"):
+            raise SystemExit(print(__doc__) or 0)
+        else:
+            break
+    return options, argv[index:]
+
+
+def main(argv):
+    try:
+        options, rest = parse_options(argv)
+        if not rest or rest[0] in ("help", "-h"):
+            print(__doc__)
+            return 0 if rest else EXIT_USAGE
+        command, args = rest[0], rest[1:]
+        # Options may also follow the command name (e.g. `install nodejs --json`),
+        # except for exec/node/npm/npx whose arguments are passed through.
+        if command not in ("exec", "node", "npm", "npx"):
+            trailing = [a for a in args if a in ("--json", "--force")]
+            args = [a for a in args if a not in ("--json", "--force")]
+            options["json"] = options["json"] or "--json" in trailing
+            options["force"] = options["force"] or "--force" in trailing
+        handler = COMMANDS.get(command)
+        if handler is None:
+            raise CtlError(f"Comando desconocido: {command} (droiddeskctl --help)", EXIT_USAGE)
+        client = Client(
+            options["package"],
+            options["port"] or port_for(options["package"]),
+            timeout=options["timeout"],
+            force=options["force"],
+        )
+        return handler(client, args, options)
+    except CtlError as error:
+        print(f"droiddeskctl: {error}", file=sys.stderr)
+        return error.code
+    except KeyboardInterrupt:
+        print("\ndroiddeskctl: interrumpido", file=sys.stderr)
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
