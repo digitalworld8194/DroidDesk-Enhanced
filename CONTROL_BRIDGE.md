@@ -6,9 +6,28 @@ Termux control, diagnose, repair and change DroidDesk's private Linux runtime
 without opening the terminal inside the desktop.
 
 ```
-Termux ──scripts/droiddeskctl──▶ TCP 127.0.0.1:<port> ──▶ DroidDesk ControlBridge ──▶ private runtime
-          (token, ~/.config/droiddesk/token)          (fixed action list)            (/data/user/0/<pkg>/files)
+Termux ──droiddeskctl──▶ 127.0.0.1:47822 ──adb forward──▶ DroidDesk 127.0.0.1:47821 ──▶ ControlBridge ──▶ private runtime
+   (token, ~/.config/droiddesk/token)                       (loopback inside Android)   (fixed action list)
 ```
+
+ControlBridge listens on Android's loopback only. Termux reaches it through an
+`adb forward` that `droiddeskctl` checks before every operation:
+
+* `adb devices` must list exactly one device in state `device`; with none (or
+  only offline/unauthorized ones, or no `adb`) it stops with **ADB REQUIRED**.
+  With several, choose one with `--serial` (or `DROIDDESK_ADB_SERIAL` /
+  `ANDROID_SERIAL`).
+* If `adb forward --list` already shows `<serial> tcp:47822 tcp:47821` it is
+  reused; otherwise `adb -s <serial> forward tcp:47822 tcp:47821` creates (or
+  re-points) it and the list is checked again.
+* Nothing is exposed to Wi-Fi/LAN: adb's listener is on Termux's 127.0.0.1 and
+  the server keeps binding `127.0.0.1` and refusing non-loopback peers.
+* Ports: `--port`/`DROIDDESK_PORT` (DroidDesk side, 47821 for the preview),
+  `--local-port`/`DROIDDESK_LOCAL_PORT` (Termux side, 47822 for the preview,
+  47830 for the original package). `--direct`/`DROIDDESK_DIRECT=1` skips adb.
+* Android's cached-app freezer can freeze DroidDesk in the background; a frozen
+  DroidDesk accepts nothing, so the client reports "no responde" after 15 s.
+  Bring DroidDesk to the foreground (or keep its desktop session running) first.
 
 ## Quick start
 
@@ -48,10 +67,12 @@ only builds that contain the bridge answer).
 | `sync-storage` | Recreate the Android storage links (DCIM, Pictures, Downloads, …) in the Linux home |
 
 Options: `--timeout S` (exec default 300 s, max 3600; installs/repairs up to
-7200), `--force`, `--json`, `--package`, `--port`.
+7200), `--force`, `--json`, `--package`, `--port`, `--local-port`, `--serial`,
+`--direct`.
 
 Exit codes: the command's own exit code for `exec`/`node`/`npm`/`npx`; 124
-timeout; 64 usage or blocked without `--force`; 69 DroidDesk not reachable;
+timeout; 64 usage, blocked without `--force` or several adb devices without
+`--serial`; 69 DroidDesk not reachable, ADB REQUIRED or adb forward failed;
 75 another package operation running; 76 protocol/identity failure; 77 not
 paired or token rejected.
 

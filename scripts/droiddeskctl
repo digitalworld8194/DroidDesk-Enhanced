@@ -2,8 +2,14 @@
 """droiddeskctl: control DroidDesk's private Linux runtime from normal Termux.
 
 Termux is the control centre; DroidDesk stays the visual PC desktop. This
-client talks to DroidDesk's ControlBridge on 127.0.0.1 only, authenticated
-with a 256-bit token obtained by pairing (see CONTROL_BRIDGE.md).
+client talks to DroidDesk's ControlBridge, which listens on 127.0.0.1 inside
+Android only, authenticated with a 256-bit token obtained by pairing (see
+CONTROL_BRIDGE.md).
+
+Android does not let Termux connect to another app's loopback port, so the
+client goes through an adb forward that it creates/reuses automatically:
+
+  Termux 127.0.0.1:47822 → adb forward → DroidDesk 127.0.0.1:47821
 
 Usage: droiddeskctl [options] <command> [args]
 
@@ -32,7 +38,13 @@ Commands:
 Options:
   --package PKG   DroidDesk package (default com.orailnoor.droiddesk.preview,
                   or $DROIDDESK_PACKAGE)
-  --port N        control port (default derived from the package)
+  --port N        DroidDesk's control port inside Android (default derived
+                  from the package: 47821 for the preview; $DROIDDESK_PORT)
+  --local-port N  Termux-side port of the adb forward (default 47822 for the
+                  preview; $DROIDDESK_LOCAL_PORT)
+  --serial S      adb device when several are connected ($DROIDDESK_ADB_SERIAL
+                  or $ANDROID_SERIAL)
+  --direct        connect to --port directly, without adb ($DROIDDESK_DIRECT=1)
   --timeout S     command timeout in seconds (exec default 300)
   --force         allow upgrades/removals that are blocked by default
   --json          print the raw JSON result
@@ -54,6 +66,11 @@ ORIGINAL_PACKAGE = "com.orailnoor.droiddesk"
 MAIN_ACTIVITY = "com.orailnoor.droiddesk.MainActivity"
 HOST = "127.0.0.1"
 BASE_PORT = 47820
+# Termux-side ends of the adb forward. Never equal to any DroidDesk port.
+LOCAL_PORTS = {ORIGINAL_PACKAGE: 47830, DEFAULT_PACKAGE: 47822}
+OTHER_LOCAL_PORT = 47832
+ADB_TIMEOUT = 20
+FIRST_FRAME_TIMEOUT = 15
 PROTOCOL = 1
 
 EXIT_UNAVAILABLE = 69
@@ -86,6 +103,96 @@ def port_for(package):
     if package == DEFAULT_PACKAGE:
         return BASE_PORT + 1
     return BASE_PORT + 2
+
+
+def local_port_for(package):
+    return LOCAL_PORTS.get(package, OTHER_LOCAL_PORT)
+
+
+def adb_required(detail):
+    return CtlError(
+        f"ADB REQUIRED: {detail}\n"
+        "DroidDesk solo escucha en el loopback de Android; Termux llega a él con\n"
+        "un adb forward. Activa la depuración inalámbrica y conecta adb\n"
+        "(adb pair IP:PUERTO, adb connect IP:PUERTO) y vuelve a intentarlo.",
+        EXIT_UNAVAILABLE,
+    )
+
+
+class AdbForward:
+    """Creates or reuses `adb forward tcp:<local> tcp:<remote>` on exactly one device."""
+
+    def __init__(self, local_port, remote_port, serial=None, adb=None):
+        self.local_port = local_port
+        self.remote_port = remote_port
+        self.serial = serial or None
+        self.adb = adb or os.environ.get("DROIDDESK_ADB") or "adb"
+
+    def _run(self, *args):
+        try:
+            completed = subprocess.run([self.adb, *args], capture_output=True, text=True,
+                                       timeout=ADB_TIMEOUT)
+        except FileNotFoundError:
+            raise adb_required(f"no se encontró '{self.adb}' (pkg install android-tools)")
+        except subprocess.TimeoutExpired:
+            raise adb_required(f"'adb {' '.join(args)}' no respondió en {ADB_TIMEOUT} s")
+        return completed.returncode, completed.stdout, completed.stderr
+
+    def devices(self):
+        """Serials in state 'device' (offline/unauthorized ones cannot forward)."""
+        code, out, err = self._run("devices")
+        if code != 0:
+            raise adb_required(f"adb devices falló: {(out + err).strip()}")
+        ready, other = [], []
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) < 2 or line.startswith("List of devices") or line.startswith("*"):
+                continue
+            (ready if parts[1] == "device" else other).append((parts[0], parts[1]))
+        return [s for s, _ in ready], other
+
+    def select_device(self):
+        ready, other = self.devices()
+        if self.serial:
+            if self.serial not in ready:
+                raise adb_required(f"el dispositivo {self.serial} no está conectado"
+                                   + (f" (dispositivos: {', '.join(ready)})" if ready else ""))
+            return self.serial
+        if not ready:
+            states = ", ".join(f"{s} {state}" for s, state in other)
+            raise adb_required("no hay ningún dispositivo adb conectado"
+                               + (f" ({states})" if states else ""))
+        if len(ready) > 1:
+            raise CtlError(
+                "Hay varios dispositivos adb: " + ", ".join(ready) + ".\n"
+                "Elige uno con --serial SERIAL (o DROIDDESK_ADB_SERIAL / ANDROID_SERIAL).",
+                EXIT_USAGE,
+            )
+        return ready[0]
+
+    def forwards(self):
+        code, out, err = self._run("forward", "--list")
+        if code != 0:
+            raise CtlError(f"adb forward --list falló: {(out + err).strip()}", EXIT_UNAVAILABLE)
+        return [tuple(line.split()[:3]) for line in out.splitlines() if len(line.split()) >= 3]
+
+    def ensure(self):
+        """Returns (serial, created) once tcp:<local> forwards to tcp:<remote> on the device."""
+        serial = self.select_device()
+        wanted = (serial, f"tcp:{self.local_port}", f"tcp:{self.remote_port}")
+        if wanted in self.forwards():
+            return serial, False
+        code, out, err = self._run("-s", serial, "forward", wanted[1], wanted[2])
+        if code != 0:
+            raise CtlError(
+                f"adb forward {wanted[1]} {wanted[2]} falló: {(out + err).strip()}\n"
+                f"¿Otro proceso usa el puerto {self.local_port}? Prueba --local-port.",
+                EXIT_UNAVAILABLE,
+            )
+        if wanted not in self.forwards():
+            raise CtlError(f"adb no muestra el forward {wanted[1]} → {wanted[2]} tras crearlo",
+                           EXIT_UNAVAILABLE)
+        return serial, True
 
 
 def config_dir():
@@ -135,11 +242,25 @@ def server_proof(token, nonce, action):
 
 
 class Client:
-    def __init__(self, package, port, timeout=None, force=False):
+    def __init__(self, package, port, timeout=None, force=False, forward=None):
+        """port is DroidDesk's port; with an AdbForward the client connects to its local port."""
         self.package = package
         self.port = port
         self.timeout = timeout
         self.force = force
+        self.forward = forward
+        self.route = None
+
+    def connect_port(self):
+        """Checks adb (before every operation) and returns the port to connect to."""
+        if self.forward is None:
+            self.route = f"directo {HOST}:{self.port}"
+            return self.port
+        serial, created = self.forward.ensure()
+        self.route = (f"{HOST}:{self.forward.local_port} → adb {serial} → "
+                      f"DroidDesk {HOST}:{self.forward.remote_port}"
+                      + (" (forward creado)" if created else " (forward existente)"))
+        return self.forward.local_port
 
     def call(self, action, args=(), on_output=None, timeout=None):
         """Sends one request; streams 'out' frames to on_output; returns the result frame."""
@@ -149,20 +270,24 @@ class Client:
         effective_timeout = timeout or self.timeout
         if effective_timeout:
             request["timeout"] = int(effective_timeout)
+        port = self.connect_port()
+        self._answered = False
         try:
-            sock = socket.create_connection((HOST, self.port), timeout=5)
+            sock = socket.create_connection((HOST, port), timeout=5)
         except (ConnectionRefusedError, socket.timeout, OSError) as error:
             raise CtlError(
-                f"DroidDesk ({self.package}) no responde en {HOST}:{self.port} ({error}).\n"
+                f"DroidDesk ({self.package}) no responde en {self.route} ({error}).\n"
                 "Abre DroidDesk (droiddeskctl open) y vuelve a intentarlo.",
                 EXIT_UNAVAILABLE,
             )
         with sock:
             reader = sock.makefile("r", encoding="utf-8", newline="\n")
             sock.sendall((json.dumps(request) + "\n").encode())
+            # A frozen DroidDesk (Android's cached-app freezer) or an adb forward
+            # with nothing behind it accepts the connection but never answers.
+            sock.settimeout(FIRST_FRAME_TIMEOUT)
+            frame = self._read_frame(reader)
             if token is not None:
-                sock.settimeout(30)
-                frame = self._read_frame(reader)
                 if frame.get("type") == "error":
                     self._raise(frame)
                 expected = server_proof(token, nonce, action)
@@ -175,9 +300,11 @@ class Client:
                         EXIT_PROTOCOL,
                     )
                 sock.sendall((json.dumps({"token": token}) + "\n").encode())
+                frame = None
             sock.settimeout(None)
             while True:
-                frame = self._read_frame(reader)
+                if frame is None:
+                    frame = self._read_frame(reader)
                 kind = frame.get("type")
                 if kind == "out":
                     if on_output:
@@ -188,12 +315,23 @@ class Client:
                     self._raise(frame)
                 else:
                     raise CtlError(f"Respuesta inesperada: {frame}", EXIT_PROTOCOL)
+                frame = None
 
-    @staticmethod
-    def _read_frame(reader):
-        line = reader.readline()
+    def _read_frame(self, reader):
+        try:
+            line = reader.readline()
+        except (ConnectionError, socket.timeout):
+            line = ""
         if not line:
+            if not self._answered:
+                raise CtlError(
+                    f"DroidDesk ({self.package}) no responde en {self.route}.\n"
+                    "Si está en segundo plano, Android puede haberlo congelado: ábrelo\n"
+                    "(droiddeskctl open) y vuelve a intentarlo.",
+                    EXIT_UNAVAILABLE,
+                )
             raise CtlError("DroidDesk cerró la conexión sin respuesta", EXIT_PROTOCOL)
+        self._answered = True
         try:
             return json.loads(line)
         except ValueError:
@@ -332,6 +470,7 @@ def cmd_status(client, args, options):
     apps = data.get("apps") or {}
     print("  apps        " + " ".join(f"{k}{mark(v)}" for k, v in apps.items()))
     print(f"  control     {bridge.get('address')}:{bridge.get('port')} · auditoría {bridge.get('auditLog')}")
+    print(f"  túnel       {client.route}")
     return 0
 
 
@@ -345,6 +484,12 @@ def local_checks(client):
         checks.append(("token de Termux", False, f"falta {path}: droiddeskctl pair"))
     checks.append(("am (Termux)", subprocess.run(["sh", "-c", "command -v am"],
                                                  capture_output=True).returncode == 0, None))
+    if client.forward is not None:
+        try:
+            client.connect_port()
+            checks.append(("adb forward", True, client.route))
+        except CtlError as error:
+            checks.append(("adb forward", False, str(error).splitlines()[0]))
     return checks
 
 
@@ -563,7 +708,10 @@ COMMANDS = {
 def parse_options(argv):
     options = {
         "package": os.environ.get("DROIDDESK_PACKAGE", DEFAULT_PACKAGE),
-        "port": None,
+        "port": int(os.environ["DROIDDESK_PORT"]) if os.environ.get("DROIDDESK_PORT") else None,
+        "local-port": int(os.environ["DROIDDESK_LOCAL_PORT"]) if os.environ.get("DROIDDESK_LOCAL_PORT") else None,
+        "serial": os.environ.get("DROIDDESK_ADB_SERIAL") or os.environ.get("ANDROID_SERIAL"),
+        "direct": os.environ.get("DROIDDESK_DIRECT") == "1",
         "timeout": None,
         "force": False,
         "json": False,
@@ -571,13 +719,19 @@ def parse_options(argv):
     index = 0
     while index < len(argv) and argv[index].startswith("--"):
         flag = argv[index]
-        if flag in ("--package", "--port", "--timeout"):
+        if flag in ("--package", "--port", "--local-port", "--serial", "--timeout"):
             if index + 1 >= len(argv):
                 raise CtlError(f"{flag} necesita un valor", EXIT_USAGE)
             value = argv[index + 1]
             key = flag[2:]
-            options[key] = int(value) if key in ("port", "timeout") else value
+            try:
+                options[key] = int(value) if key in ("port", "local-port", "timeout") else value
+            except ValueError:
+                raise CtlError(f"{flag} necesita un número", EXIT_USAGE)
             index += 2
+        elif flag == "--direct":
+            options["direct"] = True
+            index += 1
         elif flag == "--force":
             options["force"] = True
             index += 1
@@ -608,11 +762,19 @@ def main(argv):
         handler = COMMANDS.get(command)
         if handler is None:
             raise CtlError(f"Comando desconocido: {command} (droiddeskctl --help)", EXIT_USAGE)
+        remote_port = options["port"] or port_for(options["package"])
+        forward = None
+        if not options["direct"]:
+            local_port = options["local-port"] or local_port_for(options["package"])
+            if local_port == remote_port:
+                raise CtlError("--local-port no puede ser igual al puerto de DroidDesk", EXIT_USAGE)
+            forward = AdbForward(local_port, remote_port, serial=options["serial"])
         client = Client(
             options["package"],
-            options["port"] or port_for(options["package"]),
+            remote_port,
             timeout=options["timeout"],
             force=options["force"],
+            forward=forward,
         )
         return handler(client, args, options)
     except CtlError as error:
