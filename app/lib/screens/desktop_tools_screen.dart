@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:droiddesk/services/platform_bridge.dart';
 import 'package:droiddesk/theme/droid_theme.dart';
+import 'package:droiddesk/l10n/app_strings.dart';
 
 class DesktopToolsScreen extends StatefulWidget {
   const DesktopToolsScreen({super.key});
@@ -56,7 +57,7 @@ class _DesktopToolsScreenState extends State<DesktopToolsScreen>
     if (!mounted) return;
     setState(() => _dockBusy = false);
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(saved ? 'Dock updated' : 'Could not update dock')),
+      SnackBar(content: Text(saved ? l10n.dockUpdated : l10n.dockUpdateFailed)),
     );
   }
 
@@ -72,14 +73,14 @@ class _DesktopToolsScreenState extends State<DesktopToolsScreen>
       await _loadSnapshots();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Desktop snapshot created')),
+          SnackBar(content: Text(l10n.snapshotCreated)),
         );
       }
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Snapshot failed: $error')));
+        ).showSnackBar(SnackBar(content: Text(l10n.snapshotFailed('$error'))));
       }
     } finally {
       if (mounted) setState(() => _snapshotBusy = false);
@@ -90,18 +91,16 @@ class _DesktopToolsScreenState extends State<DesktopToolsScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Restore this snapshot?'),
-        content: const Text(
-          'The Linux session will stop. Current home files and settings will be replaced, and missing packages will be restored.',
-        ),
+        title: Text(l10n.restoreSnapshotTitle),
+        content: Text(l10n.restoreSnapshotMessage),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Restore'),
+            child: Text(l10n.restore),
           ),
         ],
       ),
@@ -113,7 +112,7 @@ class _DesktopToolsScreenState extends State<DesktopToolsScreen>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(restored ? 'Snapshot restored' : 'Restore failed'),
+            content: Text(restored ? l10n.snapshotRestored : l10n.restoreFailed),
           ),
         );
       }
@@ -121,7 +120,7 @@ class _DesktopToolsScreenState extends State<DesktopToolsScreen>
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Restore failed: $error')));
+        ).showSnackBar(SnackBar(content: Text(l10n.restoreFailedWithError('$error'))));
       }
     } finally {
       if (mounted) setState(() => _snapshotBusy = false);
@@ -132,16 +131,16 @@ class _DesktopToolsScreenState extends State<DesktopToolsScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Delete snapshot?'),
+        title: Text(l10n.deleteSnapshotTitle),
         content: Text(name),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(l10n.cancel),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
+            child: Text(l10n.delete),
           ),
         ],
       ),
@@ -156,13 +155,13 @@ class _DesktopToolsScreenState extends State<DesktopToolsScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Desktop Tools'),
+        title: Text(l10n.desktopTools),
         bottom: TabBar(
           controller: _tabs,
           isScrollable: true,
-          tabs: const [
-            Tab(icon: Icon(Icons.dock_rounded), text: 'Dock'),
-            Tab(icon: Icon(Icons.restore_rounded), text: 'Backups'),
+          tabs: [
+            Tab(icon: const Icon(Icons.dock_rounded), text: l10n.tabDock),
+            Tab(icon: const Icon(Icons.restore_rounded), text: l10n.tabBackups),
           ],
         ),
       ),
@@ -200,7 +199,7 @@ class _DesktopToolsScreenState extends State<DesktopToolsScreen>
       children: [
         Row(
           children: [
-            Text('PINNED', style: DroidTheme.label),
+            Text(l10n.pinnedSection, style: DroidTheme.label),
             const Spacer(),
             if (_dockBusy)
               const SizedBox(
@@ -243,14 +242,14 @@ class _DesktopToolsScreenState extends State<DesktopToolsScreen>
           },
         ),
         const SizedBox(height: 20),
-        Text('ADD AN ANDROID APP', style: DroidTheme.label),
+        Text(l10n.addAndroidAppSection, style: DroidTheme.label),
         const SizedBox(height: 8),
         TextField(
           controller: _dockSearchController,
           onChanged: (_) => setState(() {}),
-          decoration: const InputDecoration(
-            prefixIcon: Icon(Icons.search),
-            hintText: 'Search installed apps',
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.search),
+            hintText: l10n.searchInstalledApps,
           ),
         ),
         const SizedBox(height: 8),
@@ -286,21 +285,21 @@ class _DesktopToolsScreenState extends State<DesktopToolsScreen>
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(Icons.add_rounded),
-          label: const Text('Create desktop snapshot'),
+          label: Text(l10n.createSnapshot),
         ),
         const SizedBox(height: 12),
         Text(
-          'Backs up your Linux home, desktop settings, wallpaper and installed-package manifest.',
+          l10n.createSnapshotDescription,
           style: DroidTheme.bodySm,
         ),
         const SizedBox(height: 20),
-        Text('SNAPSHOTS', style: DroidTheme.label),
+        Text(l10n.snapshotsSection, style: DroidTheme.label),
         const SizedBox(height: 8),
         if (_snapshots.isEmpty)
-          const Card(
+          Card(
             child: Padding(
-              padding: EdgeInsets.all(24),
-              child: Center(child: Text('No snapshots yet')),
+              padding: const EdgeInsets.all(24),
+              child: Center(child: Text(l10n.noSnapshots)),
             ),
           ),
         ..._snapshots.map((snapshot) {
@@ -318,9 +317,9 @@ class _DesktopToolsScreenState extends State<DesktopToolsScreen>
                 onSelected: (value) => value == 'restore'
                     ? _restoreSnapshot(snapshot['name'].toString())
                     : _deleteSnapshot(snapshot['name'].toString()),
-                itemBuilder: (_) => const [
-                  PopupMenuItem(value: 'restore', child: Text('Restore')),
-                  PopupMenuItem(value: 'delete', child: Text('Delete')),
+                itemBuilder: (_) => [
+                  PopupMenuItem(value: 'restore', child: Text(l10n.restore)),
+                  PopupMenuItem(value: 'delete', child: Text(l10n.delete)),
                 ],
               ),
             ),

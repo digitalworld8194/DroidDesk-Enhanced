@@ -4,6 +4,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:droiddesk/theme/droid_theme.dart';
 import 'package:droiddesk/state/app_state.dart';
 import 'package:droiddesk/screens/setup/distro_picker.dart';
+import 'package:droiddesk/l10n/app_strings.dart';
 
 /// Welcome screen — first thing the user sees.
 /// Premium, animated landing with the DroidDesk brand.
@@ -28,9 +29,7 @@ class WelcomeScreen extends StatelessWidget {
                   alignment: Alignment.topRight,
                   child: IconButton(
                     onPressed: () => state.toggleThemeMode(),
-                    tooltip: state.isDarkMode
-                        ? 'Switch to Light Theme'
-                        : 'Switch to Dark Theme',
+                    tooltip: l10n.themeToggleTooltip(state.isDarkMode),
                     icon: Icon(
                       state.isDarkMode
                           ? Icons.light_mode_rounded
@@ -93,7 +92,7 @@ class WelcomeScreen extends StatelessWidget {
 
                 // ── Tagline ──
                 Text(
-                      'Full Linux Desktop on Android',
+                      l10n.welcomeTagline,
                       style: DroidTheme.bodyLg.copyWith(
                         color: DroidTheme.textSecondary,
                       ),
@@ -109,7 +108,7 @@ class WelcomeScreen extends StatelessWidget {
                 const SizedBox(height: 8),
 
                 Text(
-                  'Ubuntu · XFCE Desktop · Single App',
+                  l10n.welcomeHighlights,
                   style: DroidTheme.bodySm.copyWith(
                     color: DroidTheme.secondary,
                     fontWeight: FontWeight.w500,
@@ -128,19 +127,19 @@ class WelcomeScreen extends StatelessWidget {
                       [
                             _featureChip(
                               Icons.storage_rounded,
-                              'Containerized',
+                              l10n.featureContainerized,
                             ),
                             _featureChip(
                               Icons.security_rounded,
-                              'Root Optional',
+                              l10n.featureRootOptional,
                             ),
                             _featureChip(
                               Icons.desktop_mac_rounded,
-                              'Linux Desktop',
+                              l10n.featureLinuxDesktop,
                             ),
                             _featureChip(
                               Icons.offline_bolt_rounded,
-                              'Local Execution',
+                              l10n.featureLocalExecution,
                             ),
                           ]
                           .animate(interval: 100.ms)
@@ -202,7 +201,7 @@ class WelcomeScreen extends StatelessWidget {
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             Text(
-                              'Set Up Desktop Essentials',
+                              l10n.setUpDesktopEssentials,
                               style: DroidTheme.headingSm.copyWith(
                                 color: Colors.white,
                               ),

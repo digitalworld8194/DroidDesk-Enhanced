@@ -4,6 +4,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:droiddesk/theme/droid_theme.dart';
 import 'package:droiddesk/state/app_state.dart';
+import 'package:droiddesk/l10n/app_strings.dart';
 
 class DEInstallScreen extends StatefulWidget {
   const DEInstallScreen({super.key});
@@ -88,10 +89,10 @@ class _DEInstallScreenState extends State<DEInstallScreen> {
                   // ── Header ──
                   Text(
                     isDone
-                        ? 'Installation Complete'
+                        ? l10n.installationComplete
                         : hasError
-                        ? 'Installation Failed'
-                        : 'Configuring\nLinux Workstation',
+                        ? l10n.installationFailedTitle
+                        : l10n.configuringWorkstation,
                     style: DroidTheme.headingXl.copyWith(color: Colors.white),
                     textAlign: TextAlign.center,
                   ).animate().fadeIn(duration: 500.ms).slideY(begin: -0.2),
@@ -99,8 +100,8 @@ class _DEInstallScreenState extends State<DEInstallScreen> {
                   const SizedBox(height: 8),
                   Text(
                     isDone
-                        ? 'Your Linux environment is ready.'
-                        : 'Downloading and configuring system packages.',
+                        ? l10n.linuxEnvironmentReady
+                        : l10n.downloadingSystemPackages,
                     style: DroidTheme.bodyMd.copyWith(color: Colors.white60),
                     textAlign: TextAlign.center,
                   ).animate().fadeIn(delay: 200.ms),
@@ -168,7 +169,7 @@ class _DEInstallScreenState extends State<DEInstallScreen> {
                         Text(
                           state.extractStatus.isNotEmpty
                               ? state.extractStatus
-                              : 'Extracting packages...',
+                              : l10n.extractingPackages,
                           style: DroidTheme.monoSm.copyWith(
                             color: Colors.white70,
                           ),
@@ -189,7 +190,7 @@ class _DEInstallScreenState extends State<DEInstallScreen> {
                         backgroundColor: DroidTheme.primary,
                       ),
                       child: Text(
-                        'Return to Home',
+                        l10n.returnToHome,
                         style: DroidTheme.headingSm.copyWith(
                           color: Colors.white,
                         ),
@@ -209,7 +210,7 @@ class _DEInstallScreenState extends State<DEInstallScreen> {
                         backgroundColor: DroidTheme.error,
                       ),
                       child: Text(
-                        'Go Back',
+                        l10n.goBack,
                         style: DroidTheme.headingSm.copyWith(
                           color: Colors.white,
                         ),
@@ -229,7 +230,7 @@ class _DEInstallScreenState extends State<DEInstallScreen> {
                           color: DroidTheme.primary,
                         ),
                         label: Text(
-                          'Support Open Source',
+                          l10n.supportOpenSource,
                           style: DroidTheme.bodySm.copyWith(
                             color: Colors.white70,
                           ),

@@ -86,7 +86,7 @@ public class TrackpadSensitivityTest {
         assertEquals(1, store.writes);
     }
 
-    // --- slider positions and label ---
+    // --- slider positions ---
 
     @Test public void sliderStopsAreTheUsefulValues() {
         int[] expected = {25, 50, 75, 100, 125, 150, 175, 200, 250, 300};
@@ -104,10 +104,6 @@ public class TrackpadSensitivityTest {
         assertEquals(TrackpadSensitivity.stopIndex(250), TrackpadSensitivity.stopIndex(240));
         assertEquals(0, TrackpadSensitivity.stopIndex(-5));
         assertEquals(TrackpadSensitivity.stopCount() - 1, TrackpadSensitivity.stopIndex(1000));
-    }
-
-    @Test public void labelShowsValue() {
-        assertEquals("Trackpad sensitivity: 100%", TrackpadSensitivity.label(100));
     }
 
     @Test public void storedPercentDrivesPointerGain() {

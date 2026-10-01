@@ -5,6 +5,7 @@ import 'package:droiddesk/state/app_state.dart';
 import 'package:droiddesk/theme/droid_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:droiddesk/l10n/app_strings.dart';
 
 class AppCatalogScreen extends StatefulWidget {
   const AppCatalogScreen({super.key});
@@ -19,63 +20,54 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
     _FeaturedApp(
       'firefox',
       'Firefox',
-      'Fast, private desktop web browser.',
       Icons.public_rounded,
       Color(0xFFFF7139),
     ),
     _FeaturedApp(
       'code-oss',
       'Code OSS',
-      'Powerful desktop code editor and IDE.',
       Icons.code_rounded,
       Color(0xFF23A8F2),
     ),
     _FeaturedApp(
       'libreoffice',
       'LibreOffice',
-      'Documents, spreadsheets, and presentations.',
       Icons.description_rounded,
       Color(0xFF18A303),
     ),
     _FeaturedApp(
       'gimp',
       'GIMP',
-      'Professional image editing and design tools.',
       Icons.brush_rounded,
       Color(0xFF9A7654),
     ),
     _FeaturedApp(
       'blender',
       'Blender',
-      'Complete open-source 3D creation suite.',
       Icons.view_in_ar_rounded,
       Color(0xFFF5792A),
     ),
     _FeaturedApp(
       'vlc',
       'VLC',
-      'Play almost every audio and video format.',
       Icons.play_circle_rounded,
       Color(0xFFFF8800),
     ),
     _FeaturedApp(
       'nodejs',
       'Node.js + npm',
-      'JavaScript runtime and package manager.',
       Icons.javascript_rounded,
       Color(0xFF68A063),
     ),
     _FeaturedApp(
       'python',
       'Python',
-      'Popular programming language and tools.',
       Icons.terminal_rounded,
       Color(0xFFFFD43B),
     ),
     _FeaturedApp(
       'imagemagick',
       'ImageMagick',
-      'Image conversion and processing toolkit.',
       Icons.image_rounded,
       DroidTheme.primaryLight,
     ),
@@ -188,7 +180,7 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
     setState(() {
       _activePackage = packageName;
       _operationProgress = 0;
-      _operationStatus = 'Preparing $packageName...';
+      _operationStatus = l10n.preparingPackage(packageName);
       _operationLog = '';
       _cancelRequested = false;
       _cancelling = false;
@@ -205,10 +197,10 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
       SnackBar(
         content: Text(
           cancelled
-              ? '$packageName installation cancelled'
+              ? l10n.packageInstallCancelled(packageName)
               : ok
-              ? '$packageName installed'
-              : '$packageName installation failed',
+              ? l10n.packageInstalled(packageName)
+              : l10n.packageInstallFailed(packageName),
         ),
         backgroundColor: cancelled
             ? DroidTheme.surfaceLight
@@ -224,7 +216,7 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
     setState(() {
       _cancelRequested = true;
       _cancelling = true;
-      _operationStatus = 'Cancelling installation...';
+      _operationStatus = l10n.cancellingInstallation;
     });
     await DroidDeskPlatform.cancelNativePackageOperation();
   }
@@ -233,16 +225,16 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('Remove ${package.displayName}?'),
-        content: const Text('Dependent packages may also be affected.'),
+        title: Text(l10n.removePackageTitle(package.displayName)),
+        content: Text(l10n.removePackageMessage),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
+            child: Text(l10n.uninstall),
           ),
         ],
       ),
@@ -251,7 +243,7 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
     setState(() {
       _activePackage = package.name;
       _operationProgress = 0;
-      _operationStatus = 'Preparing removal...';
+      _operationStatus = l10n.preparingRemoval;
       _operationLog = '';
       _cancelRequested = false;
       _cancelling = false;
@@ -262,7 +254,7 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
     setState(() => _activePackage = null);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(ok ? '${package.displayName} removed' : 'Removal failed'),
+        content: Text(ok ? l10n.packageRemoved(package.displayName) : l10n.removalFailed),
         backgroundColor: ok ? DroidTheme.success : DroidTheme.error,
       ),
     );
@@ -272,13 +264,13 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Linux App Store'),
+        title: Text(l10n.linuxAppStore),
         bottom: TabBar(
           controller: _tabs,
-          tabs: const [
-            Tab(icon: Icon(Icons.auto_awesome_rounded), text: 'Featured'),
-            Tab(icon: Icon(Icons.search_rounded), text: 'Browse'),
-            Tab(icon: Icon(Icons.download_done_rounded), text: 'Installed'),
+          tabs: [
+            Tab(icon: const Icon(Icons.auto_awesome_rounded), text: l10n.tabFeatured),
+            Tab(icon: const Icon(Icons.search_rounded), text: l10n.tabBrowse),
+            Tab(icon: const Icon(Icons.download_done_rounded), text: l10n.tabInstalled),
           ],
         ),
       ),
@@ -300,22 +292,21 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
     final apps = [
       ..._featured,
       if (!state.hasRoot)
-        const _FeaturedApp(
+        _FeaturedApp(
           'proot_debian',
-          'Debian Compatibility',
-          'Run packages unavailable in native repositories.',
+          l10n.debianCompatibility,
           Icons.inventory_2_rounded,
-          Color(0xFFD70A53),
+          const Color(0xFFD70A53),
           optional: true,
         ),
     ];
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
       children: [
-        Text('Popular Linux applications', style: DroidTheme.headingMd),
+        Text(l10n.popularLinuxApps, style: DroidTheme.headingMd),
         const SizedBox(height: 5),
         Text(
-          'Hand-picked apps tested for DroidDesk.',
+          l10n.handPickedApps,
           style: DroidTheme.bodyMd,
         ),
         const SizedBox(height: 18),
@@ -348,7 +339,7 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
             controller: _searchController,
             onChanged: _queueSearch,
             decoration: InputDecoration(
-              hintText: 'Search packages, apps, and tools',
+              hintText: l10n.searchPackages,
               prefixIcon: const Icon(Icons.search_rounded),
               suffixIcon: _searching
                   ? const Padding(
@@ -367,7 +358,7 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
         ),
         Expanded(
           child: _searchResults.isEmpty && !_searching
-              ? const Center(child: Text('No matching packages found'))
+              ? Center(child: Text(l10n.noMatchingPackages))
               : ListView.separated(
                   padding: const EdgeInsets.fromLTRB(18, 8, 18, 28),
                   itemCount: _searchResults.length,
@@ -388,9 +379,9 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
       onRefresh: _loadInstalled,
       child: _installedPackages.isEmpty
           ? ListView(
-              children: const [
-                SizedBox(height: 220),
-                Center(child: Text('No packages installed yet')),
+              children: [
+                const SizedBox(height: 220),
+                Center(child: Text(l10n.noPackagesInstalled)),
               ],
             )
           : ListView.separated(
@@ -451,7 +442,7 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
                 const SizedBox(height: 3),
                 Text(
                   package.description.isEmpty
-                      ? 'Linux package'
+                      ? l10n.linuxPackage
                       : package.description,
                   style: DroidTheme.bodySm,
                   maxLines: 2,
@@ -461,7 +452,11 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
                 Text(
                   [
                     if (package.version.isNotEmpty) package.version,
-                    package.gui ? 'GUI app' : package.section,
+                    package.gui
+                        ? l10n.guiApp
+                        : package.section == 'System'
+                        ? l10n.sectionSystem
+                        : package.section,
                   ].where((e) => e.isNotEmpty).join(' · '),
                   style: DroidTheme.monoSm,
                 ),
@@ -479,7 +474,7 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
             IconButton(
               onPressed: busy ? null : () => _remove(package),
               icon: const Icon(Icons.delete_outline_rounded),
-              tooltip: 'Remove',
+              tooltip: l10n.uninstall,
             )
           else if (installed)
             const Icon(Icons.check_circle_rounded, color: DroidTheme.success)
@@ -495,7 +490,7 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
                         await _install(package.name);
                       }
                     },
-              child: const Text('Install'),
+              child: Text(l10n.install),
             ),
         ],
       ),
@@ -560,7 +555,7 @@ class _AppCatalogScreenState extends State<AppCatalogScreen>
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.close_rounded, size: 18),
-                label: Text(_cancelling ? 'Cancelling' : 'Cancel installation'),
+                label: Text(_cancelling ? l10n.cancelling : l10n.cancelInstallation),
               ),
             ),
             if (tail.isNotEmpty) ...[
@@ -641,7 +636,6 @@ class _PackageItem {
 class _FeaturedApp {
   final String packageName;
   final String name;
-  final String description;
   final IconData icon;
   final Color color;
   final bool optional;
@@ -649,9 +643,12 @@ class _FeaturedApp {
   const _FeaturedApp(
     this.packageName,
     this.name,
-    this.description,
     this.icon,
     this.color, {
     this.optional = false,
   });
+
+  String get description => packageName == 'proot_debian'
+      ? l10n.debianCompatibilityDescription
+      : l10n.catalogAppDescription(packageName);
 }

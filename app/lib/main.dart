@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:provider/provider.dart';
 import 'package:droiddesk/theme/droid_theme.dart';
 import 'package:droiddesk/state/app_state.dart';
 import 'package:droiddesk/services/platform_bridge.dart';
 import 'package:droiddesk/screens/welcome_screen.dart';
 import 'package:droiddesk/screens/home_screen.dart';
+import 'package:droiddesk/l10n/app_strings.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -58,6 +60,15 @@ class _DroidDeskAppState extends State<DroidDeskApp> {
     return MaterialApp(
       title: 'DroidDesk',
       debugShowCheckedModeBanner: false,
+      // Spanish by default, regardless of the Android system language.
+      locale: AppStrings.defaultLocale,
+      supportedLocales: AppStrings.supportedLocales,
+      localizationsDelegates: const [
+        AppStrings.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       theme: DroidTheme.lightThemeData,
       darkTheme: DroidTheme.darkThemeData,
       themeMode: state.themeMode,

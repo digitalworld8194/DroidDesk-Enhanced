@@ -56,8 +56,6 @@ class X11InputController(private val lorieView: LorieView) {
         return next
     }
 
-    fun modeLabel(): String = InputModes.label(mode)
-
     /** Sensitivity only affects Trackpad mode; Touch mode keeps direct pointing. */
     val isTrackpadMode: Boolean
         get() = mode == InputModes.TRACKPAD

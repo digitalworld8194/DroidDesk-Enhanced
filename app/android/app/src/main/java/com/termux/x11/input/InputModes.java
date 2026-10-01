@@ -16,10 +16,6 @@ public final class InputModes {
         return mode == TOUCH ? TRACKPAD : TOUCH;
     }
 
-    public static String label(int mode) {
-        return mode == TOUCH ? "Touch" : "Trackpad";
-    }
-
     /** Parses a stored value; anything unknown or missing falls back to TRACKPAD. */
     public static int fromStored(String stored) {
         return String.valueOf(TOUCH).equals(stored) ? TOUCH : TRACKPAD;

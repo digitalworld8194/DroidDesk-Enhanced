@@ -50,10 +50,6 @@ public final class TrackpadSensitivity {
         return best;
     }
 
-    public static String label(int percent) {
-        return "Trackpad sensitivity: " + percent + "%";
-    }
-
     public int get() {
         return mPercent;
     }

@@ -1,5 +1,6 @@
 package com.orailnoor.droiddesk.runtime
 
+import com.orailnoor.droiddesk.R
 import android.content.Context
 import android.util.Log
 import java.io.File
@@ -38,22 +39,22 @@ object XfceMobileProfile {
             val panelDir = File(homeDir, ".config/xfce4/panel")
             writeLauncher(
                 File(panelDir, "launcher-21/droiddesk-terminal.desktop"),
-                name = "Terminal",
-                comment = "Open the Linux terminal",
+                name = context.getString(R.string.launcher_terminal),
+                comment = context.getString(R.string.launcher_terminal_comment),
                 exec = "xfce4-terminal",
                 icon = "org.xfce.terminalemulator",
             )
             writeLauncher(
                 File(panelDir, "launcher-22/droiddesk-files.desktop"),
-                name = "Files",
-                comment = "Browse files",
+                name = context.getString(R.string.launcher_files),
+                comment = context.getString(R.string.launcher_files_comment),
                 exec = "thunar %u",
                 icon = "org.xfce.filemanager",
             )
             writeLauncher(
                 File(panelDir, "launcher-23/droiddesk-browser.desktop"),
-                name = "Web Browser",
-                comment = "Browse the web",
+                name = context.getString(R.string.launcher_browser),
+                comment = context.getString(R.string.launcher_browser_comment),
                 exec = "exo-open --launch WebBrowser %u",
                 icon = "org.xfce.webbrowser",
             )
@@ -72,6 +73,7 @@ object XfceMobileProfile {
      * Called every session start — does not gate on a marker.
      */
     fun updateSessionLaunchers(
+        context: Context,
         homeDir: File,
         firefoxBin: File,
         cameraPackage: String?,
@@ -84,7 +86,7 @@ object XfceMobileProfile {
                 writeLauncher(
                     File(panelDir, "launcher-23/droiddesk-browser.desktop"),
                     name = "Firefox",
-                    comment = "Browse the web with Firefox",
+                    comment = context.getString(R.string.launcher_firefox_comment),
                     exec = "firefox %u",
                     icon = "firefox",
                 )
@@ -96,8 +98,8 @@ object XfceMobileProfile {
                 val launchScript = File(homeDir, ".local/bin/droiddesk-launch-android-app.py")
                 writeLauncher(
                     File(panelDir, "launcher-26/droiddesk-camera.desktop"),
-                    name = "Camera",
-                    comment = "Open Android Camera",
+                    name = context.getString(R.string.launcher_camera),
+                    comment = context.getString(R.string.launcher_camera_comment),
                     exec = "${launchScript.absolutePath} $cameraPackage",
                     icon = "camera-photo",
                 )

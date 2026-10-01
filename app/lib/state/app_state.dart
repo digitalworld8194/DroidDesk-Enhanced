@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:droiddesk/services/platform_bridge.dart';
 import 'package:droiddesk/theme/droid_theme.dart';
+import 'package:droiddesk/l10n/app_strings.dart';
 
 /// Central state management for the entire DroidDesk app.
 class AppState extends ChangeNotifier {
@@ -36,9 +37,7 @@ class AppState extends ChangeNotifier {
   bool _isProotTerminal = false;
 
   // Terminal history
-  final List<String> _terminalOutput = [
-    'DroidDesk Linux Terminal\nType commands below.\n',
-  ];
+  final List<String> _terminalOutput = [l10n.terminalWelcome];
   List<String> get terminalOutput => _terminalOutput;
 
   // ── Device Info ──
@@ -84,7 +83,7 @@ class AppState extends ChangeNotifier {
     if (vendor.contains('adreno')) return 'Adreno (Snapdragon)';
     if (vendor.contains('mali')) return 'Mali (MediaTek/Exynos)';
     if (vendor.contains('powervr')) return 'PowerVR';
-    return 'Unknown GPU';
+    return l10n.unknownGpu;
   }
 
   // ── Initialization ──
@@ -230,7 +229,7 @@ class AppState extends ChangeNotifier {
 
       notifyListeners();
     } catch (e) {
-      _errorMessage = 'Failed to get runtime status: $e';
+      _errorMessage = l10n.runtimeStatusFailed(_describeError(e));
       notifyListeners();
     }
   }
@@ -291,7 +290,7 @@ class AppState extends ChangeNotifier {
       _setupStep = 4;
       notifyListeners();
     } catch (e) {
-      _errorMessage = 'Setup failed: $e';
+      _errorMessage = l10n.setupFailed(_describeError(e));
       _isDownloading = false;
       _isExtracting = false;
       _isInstallingDE = false;
@@ -302,13 +301,13 @@ class AppState extends ChangeNotifier {
   Future<void> _runNativeSetup() async {
     _isExtracting = true;
     _extractProgress = 0.0;
-    _extractStatus = 'Extracting native Termux bootstrap...';
+    _extractStatus = l10n.extractingTermuxBootstrap;
     _statusMessage = _extractStatus;
     notifyListeners();
     await DroidDeskPlatform.setupBootstrap();
 
     _extractProgress = 0.08;
-    _extractStatus = 'Bootstrap environment ready';
+    _extractStatus = l10n.bootstrapReady;
     _statusMessage = _extractStatus;
     _isInstallingDE = true;
     notifyListeners();
@@ -316,7 +315,7 @@ class AppState extends ChangeNotifier {
       de: _selectedDE,
     );
     if (!installed) {
-      throw StateError('Native Termux package installation failed');
+      throw StateError(l10n.nativeInstallFailed);
     }
     _isExtracting = false;
     _isInstallingDE = false;
@@ -325,31 +324,28 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _runChrootSetup() async {
-    _statusMessage = 'Downloading Ubuntu rootfs...';
+    _statusMessage = l10n.downloadingUbuntuRootfs;
     _isDownloading = true;
     _downloadProgress = 0.0;
     notifyListeners();
     if (!await DroidDeskPlatform.downloadRootfs(_selectedDistro)) {
-      throw StateError(
-        'Ubuntu download failed. Check your connection and retry.',
-      );
+      throw StateError(l10n.ubuntuDownloadFailed);
     }
 
     _isDownloading = false;
     _isExtracting = true;
     _extractProgress = 0.0;
-    _statusMessage = 'Extracting rootfs...';
+    _statusMessage = l10n.extractingRootfs;
     notifyListeners();
     if (!await DroidDeskPlatform.extractRootfs()) {
-      throw StateError('Ubuntu filesystem extraction failed');
+      throw StateError(l10n.ubuntuExtractionFailed);
     }
 
-    _statusMessage =
-        'Installing desktop environment (this may take a while)...';
+    _statusMessage = l10n.installingDesktopEnvironmentLong;
     _isInstallingDE = true;
     notifyListeners();
     if (!await DroidDeskPlatform.installDesktopEnvironment(_selectedDE)) {
-      throw StateError('Desktop Essentials package installation failed');
+      throw StateError(l10n.essentialsInstallFailed);
     }
     _isExtracting = false;
     _isInstallingDE = false;
@@ -361,7 +357,7 @@ class AppState extends ChangeNotifier {
     // Handled inside runSetup for chroot mode.
     // Kept for API compatibility.
     _extractProgress = 1.0;
-    _extractStatus = 'Extraction handled by setup flow';
+    _extractStatus = l10n.extractionHandledBySetup;
     notifyListeners();
   }
 
@@ -369,20 +365,20 @@ class AppState extends ChangeNotifier {
     try {
       _isExtracting = true;
       _extractProgress = 0.0;
-      _statusMessage = 'Installing Desktop Environment...';
+      _statusMessage = l10n.installingDesktopEnvironment;
       _errorMessage = null;
       notifyListeners();
 
       if (_hasRoot) {
         if (!await DroidDeskPlatform.installDesktopEnvironment(_selectedDE)) {
-          throw StateError('Desktop Essentials package installation failed');
+          throw StateError(l10n.essentialsInstallFailed);
         }
       } else {
         final installed = await DroidDeskPlatform.installDesktopNative(
           de: _selectedDE,
         );
         if (!installed) {
-          throw StateError('Native Termux package installation failed');
+          throw StateError(l10n.nativeInstallFailed);
         }
       }
 
@@ -390,7 +386,7 @@ class AppState extends ChangeNotifier {
       _isInstallingDE = false;
       await refreshStatus();
     } catch (e) {
-      _errorMessage = 'Installation failed: $e';
+      _errorMessage = l10n.installationFailed(_describeError(e));
       _isExtracting = false;
       _isInstallingDE = false;
       notifyListeners();
@@ -412,7 +408,7 @@ class AppState extends ChangeNotifier {
     if (_installingOptionalApp != null) return false;
     _installingOptionalApp = appId;
     _optionalInstallProgress = 0.0;
-    _optionalInstallStatus = 'Preparing installation...';
+    _optionalInstallStatus = l10n.preparingInstallation;
     _optionalInstallLog = '';
     notifyListeners();
 
@@ -442,12 +438,12 @@ class AppState extends ChangeNotifier {
         height: height,
       );
       if (!started) {
-        throw StateError('Linux runtime is not ready');
+        throw StateError(l10n.runtimeNotReady);
       }
       _isRunning = true;
       notifyListeners();
     } catch (e) {
-      _errorMessage = 'Failed to start: $e';
+      _errorMessage = l10n.startFailed(_describeError(e));
       notifyListeners();
     }
   }
@@ -456,7 +452,7 @@ class AppState extends ChangeNotifier {
     try {
       await DroidDeskPlatform.launchDesktopActivity();
     } catch (e) {
-      _errorMessage = 'Failed to launch desktop activity: $e';
+      _errorMessage = l10n.launchDesktopFailed(_describeError(e));
       notifyListeners();
     }
   }
@@ -467,7 +463,7 @@ class AppState extends ChangeNotifier {
       _isRunning = false;
       notifyListeners();
     } catch (e) {
-      _errorMessage = 'Failed to stop: $e';
+      _errorMessage = l10n.stopFailed(_describeError(e));
       notifyListeners();
     }
   }
@@ -487,7 +483,7 @@ class AppState extends ChangeNotifier {
       _setupStep = 0;
       notifyListeners();
     } catch (e) {
-      _errorMessage = 'Reinstall failed: $e';
+      _errorMessage = l10n.reinstallFailed(_describeError(e));
       notifyListeners();
     }
   }
@@ -519,9 +515,13 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Error text without Dart's English "Bad state: " prefix for our own errors.
+  static String _describeError(Object error) =>
+      error is StateError ? error.message : '$error';
+
   void clearTerminal() {
     _terminalOutput.clear();
-    _terminalOutput.add('DroidDesk Linux Terminal\nType commands below.\n');
+    _terminalOutput.add(l10n.terminalWelcome);
     notifyListeners();
   }
 

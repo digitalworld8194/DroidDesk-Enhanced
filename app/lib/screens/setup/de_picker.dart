@@ -4,6 +4,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:droiddesk/theme/droid_theme.dart';
 import 'package:droiddesk/state/app_state.dart';
 import 'package:droiddesk/screens/setup/setup_progress.dart';
+import 'package:droiddesk/l10n/app_strings.dart';
 
 /// Desktop Environment picker — the only choice before Essentials setup.
 class DEPickerScreen extends StatelessWidget {
@@ -13,8 +14,6 @@ class DEPickerScreen extends StatelessWidget {
     _DEOption(
       id: 'xfce4',
       name: 'XFCE4',
-      description:
-          'Fast, customizable, low resource usage. The best all-rounder.',
       ram: '~300 MB RAM',
       icon: Icons.grid_view_rounded,
       color: DroidTheme.secondary,
@@ -23,7 +22,6 @@ class DEPickerScreen extends StatelessWidget {
     _DEOption(
       id: 'lxqt',
       name: 'LXQt',
-      description: 'Ultra-lightweight Qt-based desktop. Fastest option.',
       ram: '~200 MB RAM',
       icon: Icons.widgets_rounded,
       color: Color(0xFF0A82F1),
@@ -32,7 +30,6 @@ class DEPickerScreen extends StatelessWidget {
     _DEOption(
       id: 'mate',
       name: 'MATE',
-      description: 'Classic GNOME 2 fork. Familiar and comfortable.',
       ram: '~400 MB RAM',
       icon: Icons.view_comfy_rounded,
       color: Color(0xFF87A556),
@@ -41,7 +38,6 @@ class DEPickerScreen extends StatelessWidget {
     _DEOption(
       id: 'kde',
       name: 'KDE Plasma',
-      description: 'Modern, feature-rich. Needs strong GPU and 4GB+ RAM.',
       ram: '~600 MB RAM',
       icon: Icons.auto_awesome_mosaic_rounded,
       color: Color(0xFF1D99F3),
@@ -73,9 +69,7 @@ class DEPickerScreen extends StatelessWidget {
                     const SizedBox(width: 12),
                     IconButton(
                       onPressed: () => state.toggleThemeMode(),
-                      tooltip: state.isDarkMode
-                          ? 'Switch to Light Theme'
-                          : 'Switch to Dark Theme',
+                      tooltip: l10n.themeToggleTooltip(state.isDarkMode),
                       icon: Icon(
                         state.isDarkMode
                             ? Icons.light_mode_rounded
@@ -93,14 +87,14 @@ class DEPickerScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 32),
 
-                Text('Choose Desktop', style: DroidTheme.headingXl)
+                Text(l10n.chooseDesktop, style: DroidTheme.headingXl)
                     .animate()
                     .fadeIn(duration: 400.ms)
                     .slideX(begin: -0.1, duration: 400.ms),
 
                 const SizedBox(height: 8),
                 Text(
-                  'Desktop Essentials installs the selected desktop, terminal, file manager, and core tools. More apps can be added later.',
+                  l10n.chooseDesktopSubtitle,
                   style: DroidTheme.bodyMd,
                 ).animate().fadeIn(delay: 100.ms, duration: 400.ms),
 
@@ -170,7 +164,7 @@ class DEPickerScreen extends StatelessWidget {
                     children: [
                       OutlinedButton(
                         onPressed: () => Navigator.pop(context),
-                        child: const Text('Back'),
+                        child: Text(l10n.back),
                       ),
                       const Spacer(),
                       ElevatedButton(
@@ -198,10 +192,10 @@ class DEPickerScreen extends StatelessWidget {
                             ),
                           );
                         },
-                        child: const Row(
+                        child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text('Install Essentials'),
+                            Text(l10n.installEssentials),
                             SizedBox(width: 4),
                             Icon(Icons.download_rounded, size: 18),
                           ],
@@ -268,7 +262,7 @@ class DEPickerScreen extends StatelessWidget {
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
-                            'BEST',
+                            l10n.bestBadge,
                             style: DroidTheme.label.copyWith(
                               color: DroidTheme.accent,
                               fontSize: 8,
@@ -335,7 +329,6 @@ class DEPickerScreen extends StatelessWidget {
 class _DEOption {
   final String id;
   final String name;
-  final String description;
   final String ram;
   final IconData icon;
   final Color color;
@@ -344,10 +337,11 @@ class _DEOption {
   const _DEOption({
     required this.id,
     required this.name,
-    required this.description,
     required this.ram,
     required this.icon,
     required this.color,
     required this.recommended,
   });
+
+  String get description => l10n.desktopDescription(id);
 }

@@ -1,5 +1,6 @@
 package com.orailnoor.droiddesk.runtime
 
+import com.orailnoor.droiddesk.R
 import android.content.Context
 import android.util.Log
 import android.util.Base64
@@ -135,15 +136,10 @@ class ChrootRuntime(private val context: Context) {
                 # Disable accessibility bus spam
                 export NO_AT_BRIDGE=1
                 export GTK_A11Y=none
-
-                # Locale
-                export LANG=C.UTF-8
-                export LC_ALL=C.UTF-8
-                export LANGUAGE=C.UTF-8
-
+                """.trimIndent() + "\n\n" + LinuxLocale.chrootProfileSnippet + "\n\n" + """
                 # Prompt
                 export PS1='\[\033[01;32m\]droiddesk\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ '
-                """.trimIndent()
+                """.trimIndent() + "\n"
             )
         }
 
@@ -177,39 +173,50 @@ class ChrootRuntime(private val context: Context) {
         onLog: (String) -> Unit = {}
     ) {
         if (!hasRoot()) {
-            onProgress(-1.0, "Root access required for chroot mode")
+            onProgress(-1.0, context.getString(R.string.progress_root_required))
             return
         }
         if (!isRootfsReady()) {
-            onProgress(-1.0, "Rootfs not ready. Download and extract first.")
+            onProgress(-1.0, context.getString(R.string.progress_rootfs_not_ready))
             return
         }
 
         thread(name = "chroot-de-install") {
             try {
-                onProgress(0.0, "Mounting rootfs...")
+                onProgress(0.0, context.getString(R.string.progress_mounting_rootfs))
                 ensureMounts()
 
-                onProgress(0.05, "Updating package lists...")
+                onProgress(0.05, context.getString(R.string.progress_updating_package_lists))
                 if (execChroot("apt-get update -y", onLog) != 0) {
                     throw IllegalStateException("Package index update failed")
                 }
 
-                onProgress(0.1, "Installing core tools...")
+                onProgress(0.1, context.getString(R.string.progress_installing_core_tools))
                 if (execChroot(
                     "DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y --no-install-recommends " +
                             "locales ca-certificates wget curl dbus-x11 xclip",
                     onLog
                 ) != 0) throw IllegalStateException("Core package installation failed")
 
-                onProgress(0.2, "Installing Mesa GPU drivers...")
+                // Spanish locales and translations; the desktop still works in English without them.
+                onProgress(0.15, context.getString(R.string.progress_configuring_language))
+                if (execChroot(LinuxLocale.CHROOT_GENERATE_COMMAND, onLog) != 0) {
+                    Log.w(TAG, "Spanish locales could not be generated; session falls back to C.UTF-8")
+                }
+                if (execChroot(
+                    "DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y --no-install-recommends " +
+                            LinuxLocale.CHROOT_LANGUAGE_PACKAGES,
+                    onLog
+                ) != 0) Log.w(TAG, "Spanish language packs unavailable; untranslated texts stay in English")
+
+                onProgress(0.2, context.getString(R.string.progress_installing_mesa))
                 if (execChroot(
                     "DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y --no-install-recommends " +
                             "mesa-vulkan-drivers mesa-opencl-icd libgl1-mesa-dri libglx-mesa0 vulkan-tools",
                     onLog
                 ) != 0) Log.w(TAG, "Mesa packages unavailable; desktop will use available software rendering")
 
-                onProgress(0.4, "Installing desktop environment...")
+                onProgress(0.4, context.getString(R.string.progress_installing_desktop_environment))
                 val dePackages = when (desktopEnv) {
                     "lxqt" -> "lxqt qterminal pcmanfm-qt featherpad"
                     "mate" -> "mate-desktop-environment mate-terminal"
@@ -221,7 +228,7 @@ class ChrootRuntime(private val context: Context) {
                     onLog
                 ) != 0) throw IllegalStateException("Desktop package installation failed")
 
-                onProgress(0.8, "Installing Desktop Essentials tools...")
+                onProgress(0.8, context.getString(R.string.progress_installing_essentials_tools))
                 val essentialsExit = execChroot(
                     "DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install -y --no-install-recommends " +
                             "git nano htop wget curl python3 python3-pip openssh-client",
@@ -229,15 +236,15 @@ class ChrootRuntime(private val context: Context) {
                 )
                 if (essentialsExit != 0) throw IllegalStateException("Desktop Essentials package installation failed")
 
-                onProgress(0.9, "Cleaning up...")
+                onProgress(0.9, context.getString(R.string.progress_cleaning_up))
                 execChroot("apt-get clean", onLog)
 
                 File(rootfsDir, CHROOT_DE_MARKER).writeText("$desktopEnv\n")
-                onProgress(1.0, "$desktopEnv installed in chroot")
+                onProgress(1.0, context.getString(R.string.progress_desktop_installed, desktopEnv))
                 Log.i(TAG, "Desktop environment installation complete")
             } catch (e: Exception) {
                 Log.e(TAG, "DE install failed", e)
-                onProgress(-1.0, "Installation failed: ${e.message}")
+                onProgress(-1.0, context.getString(R.string.progress_installation_failed, e.message.orEmpty()))
             }
         }
     }
@@ -249,13 +256,13 @@ class ChrootRuntime(private val context: Context) {
     ): Boolean {
         if (!hasRoot() || !isDesktopInstalled()) return false
         if (getOptionalAppsStatus()[appId] == true) {
-            onProgress(1.0, "Already installed")
+            onProgress(1.0, context.getString(R.string.progress_already_installed))
             return true
         }
 
         return try {
             ensureMounts()
-            onProgress(0.05, "Repairing interrupted packages...")
+            onProgress(0.05, context.getString(R.string.progress_repairing_packages))
             execChroot("DEBIAN_FRONTEND=noninteractive dpkg --configure -a", onLog)
 
             val command = when (appId) {
@@ -285,14 +292,14 @@ class ChrootRuntime(private val context: Context) {
                 else -> return false
             }
 
-            onProgress(0.25, "Installing optional application...")
+            onProgress(0.25, context.getString(R.string.progress_installing_optional_app))
             val exitCode = execChroot(command, onLog)
             if (exitCode != 0) throw IllegalStateException("Package manager exited with code $exitCode")
-            onProgress(1.0, "Installation complete")
+            onProgress(1.0, context.getString(R.string.progress_installation_complete))
             true
         } catch (error: Exception) {
             Log.e(TAG, "Optional app installation failed: $appId", error)
-            onProgress(-1.0, "Installation failed: ${error.message}")
+            onProgress(-1.0, context.getString(R.string.progress_installation_failed, error.message.orEmpty()))
             false
         }
     }

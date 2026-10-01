@@ -123,7 +123,7 @@ class MainActivity : FlutterActivity() {
                 Log.i(TAG, "Auto-setup: checking root...")
                 if (!chrootRuntime.hasRoot()) {
                     runOnUiThread {
-                        android.widget.Toast.makeText(this, "Auto-setup requires root", android.widget.Toast.LENGTH_LONG).show()
+                        android.widget.Toast.makeText(this, getString(R.string.auto_setup_requires_root), android.widget.Toast.LENGTH_LONG).show()
                     }
                     return@thread
                 }
@@ -186,7 +186,7 @@ class MainActivity : FlutterActivity() {
             } catch (e: Exception) {
                 Log.e(TAG, "Auto-setup failed", e)
                 runOnUiThread {
-                    android.widget.Toast.makeText(this, "Auto-setup failed: ${e.message}", android.widget.Toast.LENGTH_LONG).show()
+                    android.widget.Toast.makeText(this, getString(R.string.auto_setup_failed, e.message.orEmpty()), android.widget.Toast.LENGTH_LONG).show()
                 }
             }
         }
@@ -610,7 +610,7 @@ class MainActivity : FlutterActivity() {
                                 runOnUiThread {
                                     Toast.makeText(
                                         this@MainActivity,
-                                        "Native Linux setup failed. Check the setup log.",
+                                        getString(R.string.native_setup_failed),
                                         Toast.LENGTH_LONG,
                                     ).show()
                                     result.success(false)
@@ -913,7 +913,7 @@ class MainActivity : FlutterActivity() {
 
     private fun requestDefaultLauncher() {
         if (isDefaultLauncher()) {
-            Toast.makeText(this, "DroidDesk is already the default launcher", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.already_default_launcher), Toast.LENGTH_SHORT).show()
             return
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -952,13 +952,13 @@ class MainActivity : FlutterActivity() {
 
     private fun openHomeChooser() {
         val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
-        startActivity(Intent.createChooser(homeIntent, "Choose your Home app"))
+        startActivity(Intent.createChooser(homeIntent, getString(R.string.choose_home_app)))
     }
 
     private fun openHomeSettings() {
         Toast.makeText(
             this,
-            "Android requires you to select another default Home app",
+            getString(R.string.select_other_home_app),
             Toast.LENGTH_LONG,
         ).show()
         startActivity(Intent(Settings.ACTION_HOME_SETTINGS))

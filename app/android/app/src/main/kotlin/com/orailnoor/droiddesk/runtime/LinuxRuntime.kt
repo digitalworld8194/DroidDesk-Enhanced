@@ -1,5 +1,6 @@
 package com.orailnoor.droiddesk.runtime
 
+import com.orailnoor.droiddesk.R
 import android.content.Context
 import android.os.Build
 import android.util.Log
@@ -1052,7 +1053,9 @@ class LinuxRuntime(private val context: Context) {
         env["SHELL"] = File(binDir, "bash").absolutePath
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
-        env["LANG"] = "en_US.UTF-8"
+        // Spanish session; see LinuxLocale for what Bionic/Termux can translate.
+        env["LANG"] = LinuxLocale.PREFERRED
+        env["LANGUAGE"] = LinuxLocale.LANGUAGE
 
         env["DISPLAY"] = ":0"
         env["XDG_RUNTIME_DIR"] = tmpDir.absolutePath
@@ -1249,7 +1252,7 @@ class LinuxRuntime(private val context: Context) {
         if (installAndRecover()) return true
         if (packageOperationCancelled) return false
 
-        onProgress?.invoke(retryProgress, "Refreshing package repositories and retrying...")
+        onProgress?.invoke(retryProgress, context.getString(R.string.progress_retrying_repositories))
         // apt may update main/X11 successfully while a third-party repository is
         // temporarily inconsistent. Retrying is still useful with those newly
         // refreshed lists and apt's last verified TUR index.
@@ -1318,7 +1321,7 @@ class LinuxRuntime(private val context: Context) {
     private fun installMinimalDebian(
         onProgress: ((Double, String) -> Unit)? = null,
     ): Boolean {
-        onProgress?.invoke(0.12, "Installing lightweight PRoot runtime...")
+        onProgress?.invoke(0.12, context.getString(R.string.progress_installing_proot))
         if (!installOptionalPackages(listOf("proot", "proot-distro"), onProgress, 0.28)) {
             return false
         }
@@ -1334,19 +1337,19 @@ class LinuxRuntime(private val context: Context) {
             // Remove an interrupted extraction so proot-distro can safely retry.
             File(prefixDir, "var/lib/proot-distro/containers/debian").deleteRecursively()
             File(prefixDir, "var/lib/proot-distro/installed-rootfs/debian").deleteRecursively()
-            onProgress?.invoke(0.38, "Downloading minimal Debian base system...")
+            onProgress?.invoke(0.38, context.getString(R.string.progress_downloading_debian))
             if (executeCommand("proot-distro install debian").startsWith("Error:")) {
                 Log.e(TAG, "Minimal Debian rootfs installation failed")
                 return false
             }
         }
 
-        onProgress?.invoke(0.9, "Creating Debian shell shortcut...")
+        onProgress?.invoke(0.9, context.getString(R.string.progress_creating_debian_shortcut))
         writeDebianLauncher()
 
         // The downloaded archive is not needed after extraction.
         clearProotDownloadCache()
-        onProgress?.invoke(1.0, "Minimal Debian compatibility is ready")
+        onProgress?.invoke(1.0, context.getString(R.string.progress_debian_ready))
         return isMinimalDebianInstalled()
     }
 
@@ -1358,7 +1361,7 @@ class LinuxRuntime(private val context: Context) {
         val marker = File(prefixDir, DE_MARKER)
 
         if (getInstalledDE() == selectedDesktop) {
-            onProgress?.invoke(1.0, "$selectedDesktop is already installed")
+            onProgress?.invoke(1.0, context.getString(R.string.progress_desktop_already_installed, selectedDesktop))
             Log.i(TAG, "$selectedDesktop desktop environment already installed")
             return true
         }
@@ -1371,7 +1374,7 @@ class LinuxRuntime(private val context: Context) {
         patchShebangs()
         patchElfRunpaths(prefixDir)
         compileSocketHook()
-        onProgress?.invoke(0.12, "Configuring X11 and TUR repositories...")
+        onProgress?.invoke(0.12, context.getString(R.string.progress_configuring_x11_tur))
 
         // Install the x11/tur repository packages. Their postinst scripts run
         // `apt update`, which triggers SIGSYS under the app's seccomp filter, so we
@@ -1381,7 +1384,7 @@ class LinuxRuntime(private val context: Context) {
             Log.e(TAG, "Failed to install x11-repo/tur-repo")
             return false
         }
-        onProgress?.invoke(0.24, "Updating native package database...")
+        onProgress?.invoke(0.24, context.getString(R.string.progress_updating_native_database))
 
         // Finish configuring anything left over from a previous run, then install
         // the desktop, GPU drivers, and build tools. Each install is followed by a
@@ -1394,14 +1397,14 @@ class LinuxRuntime(private val context: Context) {
             Log.e(TAG, "pkg update failed")
             return false
         }
-        onProgress?.invoke(0.34, "Installing X11 and audio packages...")
+        onProgress?.invoke(0.34, context.getString(R.string.progress_installing_x11_audio))
         // DroidDesk embeds the X server, so termux-x11-nightly is deliberately
         // not installed. All desktops connect to the service's DISPLAY=:0.
         if (!installPackageGroup("pkg install -y xorg-xrandr pulseaudio xclip")) {
             Log.e(TAG, "Native X11 runtime package install failed")
             return false
         }
-        onProgress?.invoke(0.46, "Installing $selectedDesktop desktop packages...")
+        onProgress?.invoke(0.46, context.getString(R.string.progress_installing_desktop_packages, selectedDesktop))
 
         val desktopPackages = when (selectedDesktop) {
             "lxqt" -> "lxqt qterminal pcmanfm-qt featherpad"
@@ -1413,7 +1416,7 @@ class LinuxRuntime(private val context: Context) {
             Log.e(TAG, "$selectedDesktop package install failed")
             return false
         }
-        onProgress?.invoke(0.70, "Installing Mesa graphics packages...")
+        onProgress?.invoke(0.70, context.getString(R.string.progress_installing_mesa_packages))
 
         // mesa-zink pulls the Vulkan loader selected by the active Termux repo.
         // Current repositories use vulkan-loader-generic, which provides and
@@ -1429,26 +1432,26 @@ class LinuxRuntime(private val context: Context) {
         // Turnip/Freedreno is the hardware path for Qualcomm Adreno. Do not
         // install or force that ICD on Mali/PowerVR devices.
         if (hasAdrenoGpu()) {
-            onProgress?.invoke(0.78, "Installing Adreno hardware acceleration...")
+            onProgress?.invoke(0.78, context.getString(R.string.progress_installing_adreno))
             installPackageGroup("pkg install -y mesa-vulkan-icd-freedreno")
         }
 
         val nativeTools = "git wget curl openssh htop python clang"
         onProgress?.invoke(
             0.84,
-            "Installing Desktop Essentials tools...",
+            context.getString(R.string.progress_installing_essentials_tools),
         )
         if (!installPackageGroup("pkg install -y $nativeTools")) {
             Log.e(TAG, "Native Termux utility package install failed")
             return false
         }
-        onProgress?.invoke(0.94, "Finalizing native Linux environment...")
+        onProgress?.invoke(0.94, context.getString(R.string.progress_finalizing_native))
 
         // Rebuild the hook with the installed clang, then persist the selected DE.
         compileSocketHook()
         patchEmbeddedXfcePaths()
         marker.writeText(selectedDesktop)
-        onProgress?.invoke(1.0, "Native Linux setup complete")
+        onProgress?.invoke(1.0, context.getString(R.string.progress_native_setup_complete))
         Log.i(TAG, "Native Termux $selectedDesktop installation complete")
         return true
     }
@@ -1459,7 +1462,7 @@ class LinuxRuntime(private val context: Context) {
     ): Boolean {
         if (getInstalledDE().isEmpty()) return false
         if (getOptionalAppsStatus()[appId] == true) {
-            onProgress?.invoke(1.0, "Already installed")
+            onProgress?.invoke(1.0, context.getString(R.string.progress_already_installed))
             return true
         }
 
@@ -1467,31 +1470,31 @@ class LinuxRuntime(private val context: Context) {
         // original Termux preinst path is invalid in our relocated prefix.
         // Repair/install Node before the generic dpkg configure pass.
         if (appId == "nodejs" || appId == "code_oss") {
-            onProgress?.invoke(0.08, "Preparing relocated Node.js dependency...")
+            onProgress?.invoke(0.08, context.getString(R.string.progress_preparing_nodejs))
             if (!isDpkgPackageInstalled("nodejs") && !installRelocatedNodejs()) return false
         }
 
-        onProgress?.invoke(0.18, "Repairing interrupted packages...")
+        onProgress?.invoke(0.18, context.getString(R.string.progress_repairing_packages))
         if (!installPackageGroup("dpkg --configure -a")) return false
 
         val ok = when (appId) {
             "firefox" -> {
-                onProgress?.invoke(0.25, "Installing Firefox...")
+                onProgress?.invoke(0.25, context.getString(R.string.progress_installing_named, "Firefox"))
                 installOptionalPackages(listOf("firefox"), onProgress, 0.55)
             }
             "code_oss" -> {
-                onProgress?.invoke(0.45, "Installing npm dependency...")
+                onProgress?.invoke(0.45, context.getString(R.string.progress_installing_npm_dependency))
                 installOptionalPackages(listOf("npm"), onProgress, 0.55) && run {
-                    onProgress?.invoke(0.65, "Installing Code OSS...")
+                    onProgress?.invoke(0.65, context.getString(R.string.progress_installing_named, "Code OSS"))
                     installOptionalPackages(listOf("code-oss"), onProgress, 0.78)
                 }
             }
             "nodejs" -> {
-                onProgress?.invoke(0.65, "Installing npm...")
+                onProgress?.invoke(0.65, context.getString(R.string.progress_installing_named, "npm"))
                 installOptionalPackages(listOf("npm"), onProgress, 0.78)
             }
             "imagemagick" -> {
-                onProgress?.invoke(0.25, "Installing ImageMagick...")
+                onProgress?.invoke(0.25, context.getString(R.string.progress_installing_named, "ImageMagick"))
                 installOptionalPackages(listOf("imagemagick"), onProgress, 0.55)
             }
             "proot_debian" -> installMinimalDebian(onProgress)
@@ -1501,9 +1504,9 @@ class LinuxRuntime(private val context: Context) {
         val verified = ok && getOptionalAppsStatus()[appId] == true
         if (verified) {
             patchShebangs(force = true)
-            onProgress?.invoke(1.0, "Installation complete")
+            onProgress?.invoke(1.0, context.getString(R.string.progress_installation_complete))
         } else {
-            onProgress?.invoke(-1.0, "Installation failed. Review the package log and retry.")
+            onProgress?.invoke(-1.0, context.getString(R.string.progress_optional_install_failed))
         }
         return verified
     }
@@ -1552,16 +1555,16 @@ class LinuxRuntime(private val context: Context) {
         onProgress: (Double, String) -> Unit,
     ): Boolean {
         if (!isSafePackageName(packageName)) {
-            onProgress(-1.0, "Invalid package name")
+            onProgress(-1.0, context.getString(R.string.progress_invalid_package))
             return false
         }
-        onProgress(0.08, "Repairing interrupted package operations...")
+        onProgress(0.08, context.getString(R.string.progress_repairing_operations))
         installPackageGroup("dpkg --configure -a")
         if (packageOperationCancelled) {
-            onProgress(-1.0, "Installation cancelled")
+            onProgress(-1.0, context.getString(R.string.progress_installation_cancelled))
             return false
         }
-        onProgress(0.22, "Installing $packageName and dependencies...")
+        onProgress(0.22, context.getString(R.string.progress_installing_with_dependencies, packageName))
         val optionalId = when (packageName) {
             "firefox" -> "firefox"
             "code-oss", "code" -> "code_oss"
@@ -1577,14 +1580,14 @@ class LinuxRuntime(private val context: Context) {
             installOptionalPackages(listOf(packageName), onProgress, 0.5)
         }
         if (packageOperationCancelled) {
-            onProgress(-1.0, "Installation cancelled")
+            onProgress(-1.0, context.getString(R.string.progress_installation_cancelled))
             return false
         }
         patchShebangs(force = true)
         refreshDesktopMenus()
         val installed = ok && isDpkgPackageInstalled(packageName)
         if (installed) setStorePackageInstalled(packageName, true)
-        onProgress(if (installed) 1.0 else -1.0, if (installed) "$packageName installed" else "$packageName installation failed")
+        onProgress(if (installed) 1.0 else -1.0, if (installed) context.getString(R.string.progress_package_installed, packageName) else context.getString(R.string.progress_package_install_failed, packageName))
         return installed
     }
 
@@ -1593,13 +1596,13 @@ class LinuxRuntime(private val context: Context) {
         onProgress: (Double, String) -> Unit,
     ): Boolean {
         if (!isSafePackageName(packageName) || isProtectedPackage(packageName)) {
-            onProgress(-1.0, "This package is required by DroidDesk")
+            onProgress(-1.0, context.getString(R.string.progress_package_required))
             return false
         }
-        onProgress(0.15, "Removing $packageName...")
+        onProgress(0.15, context.getString(R.string.progress_removing_package, packageName))
         val output = executeCommand("apt-get remove -y $packageName")
         if (packageOperationCancelled) {
-            onProgress(-1.0, "Removal cancelled")
+            onProgress(-1.0, context.getString(R.string.progress_removal_cancelled))
             return false
         }
         patchShebangs(force = true)
@@ -1607,7 +1610,7 @@ class LinuxRuntime(private val context: Context) {
         refreshDesktopMenus()
         val removed = !isDpkgPackageInstalled(packageName)
         if (removed) setStorePackageInstalled(packageName, false)
-        onProgress(if (removed) 1.0 else -1.0, if (removed) "$packageName removed" else "$packageName removal failed")
+        onProgress(if (removed) 1.0 else -1.0, if (removed) context.getString(R.string.progress_package_removed, packageName) else context.getString(R.string.progress_package_removal_failed, packageName))
         return removed && !output.startsWith("Error:")
     }
 
@@ -1796,6 +1799,7 @@ class LinuxRuntime(private val context: Context) {
                 }.getOrDefault(false)
             }
             XfceMobileProfile.updateSessionLaunchers(
+                context = context,
                 homeDir = homeDir,
                 firefoxBin = File(binDir, "firefox"),
                 cameraPackage = cameraPackage,

@@ -8,6 +8,7 @@ import 'package:droiddesk/services/platform_bridge.dart';
 import 'package:droiddesk/screens/setup/de_install_screen.dart';
 import 'package:droiddesk/screens/apps/app_catalog_screen.dart';
 import 'package:droiddesk/screens/desktop_tools_screen.dart';
+import 'package:droiddesk/l10n/app_strings.dart';
 
 /// Home dashboard — shown after setup is complete.
 /// Central hub for launching the desktop, terminal, and managing the environment.
@@ -63,7 +64,7 @@ class HomeScreen extends StatelessWidget {
                         children: [
                           Text('DroidDesk', style: DroidTheme.headingSm),
                           Text(
-                            state.isRunning ? 'Desktop Running' : 'Ready',
+                            state.isRunning ? l10n.desktopRunning : l10n.ready,
                             style: DroidTheme.bodySm.copyWith(
                               color: state.isRunning
                                   ? DroidTheme.accent
@@ -75,9 +76,7 @@ class HomeScreen extends StatelessWidget {
                       const Spacer(),
                       IconButton(
                         onPressed: () => state.toggleThemeMode(),
-                        tooltip: state.isDarkMode
-                            ? 'Switch to Light Theme'
-                            : 'Switch to Dark Theme',
+                        tooltip: l10n.themeToggleTooltip(state.isDarkMode),
                         icon: Icon(
                           state.isDarkMode
                               ? Icons.light_mode_rounded
@@ -113,7 +112,7 @@ class HomeScreen extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
                   child: Text(
-                    'QUICK ACTIONS',
+                    l10n.quickActions,
                     style: DroidTheme.label,
                   ).animate().fadeIn(delay: 200.ms, duration: 400.ms),
                 ),
@@ -129,9 +128,8 @@ class HomeScreen extends StatelessWidget {
                       if (!state.isDEInstalled) ...[
                         _ActionCard(
                           icon: Icons.download_rounded,
-                          title: 'Install ${state.selectedDE.toUpperCase()}',
-                          subtitle:
-                              'Install desktop environment packages (one-time setup)',
+                          title: l10n.installDesktop(state.selectedDE.toUpperCase()),
+                          subtitle: l10n.installDesktopSubtitle,
                           color: DroidTheme.secondary,
                           onTap: () {
                             Navigator.of(context).push(
@@ -150,9 +148,8 @@ class HomeScreen extends StatelessWidget {
                           padding: const EdgeInsets.only(bottom: 10),
                           child: _ActionCard(
                             icon: Icons.fullscreen_rounded,
-                            title: 'Return to Desktop',
-                            subtitle:
-                                '${state.selectedDE.toUpperCase()} is currently running in background',
+                            title: l10n.returnToDesktop,
+                            subtitle: l10n.runningInBackground(state.selectedDE.toUpperCase()),
                             color: DroidTheme.primary,
                             gradient: DroidTheme.primaryGradient,
                             onTap: () {
@@ -166,11 +163,11 @@ class HomeScreen extends StatelessWidget {
                             ? Icons.stop_circle_rounded
                             : Icons.desktop_mac_rounded,
                         title: state.isRunning
-                            ? 'Stop Server'
-                            : 'Launch Desktop',
+                            ? l10n.stopServer
+                            : l10n.launchDesktop,
                         subtitle: state.isRunning
-                            ? 'Shutdown Linux environment'
-                            : 'Start ${state.selectedDE.toUpperCase()} desktop environment',
+                            ? l10n.shutdownLinux
+                            : l10n.startDesktopEnvironment(state.selectedDE.toUpperCase()),
                         color: state.isRunning
                             ? DroidTheme.error
                             : DroidTheme.primary,
@@ -183,10 +180,8 @@ class HomeScreen extends StatelessWidget {
                           } else {
                             if (!state.isDEInstalled) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    'No Desktop Environment installed. Please complete setup first.',
-                                  ),
+                                SnackBar(
+                                  content: Text(l10n.noDesktopInstalled),
                                   backgroundColor: DroidTheme.error,
                                 ),
                               );
@@ -202,9 +197,8 @@ class HomeScreen extends StatelessWidget {
                       // ── Terminal ──
                       _ActionCard(
                         icon: Icons.terminal_rounded,
-                        title: 'Terminal',
-                        subtitle:
-                            'Open a Linux shell in the ${state.hasRoot ? 'Ubuntu chroot' : 'native Termux'} environment',
+                        title: l10n.terminal,
+                        subtitle: l10n.terminalSubtitle(chroot: state.hasRoot),
                         color: DroidTheme.secondary,
                         onTap: () {
                           state.useNativeTerminal();
@@ -217,9 +211,8 @@ class HomeScreen extends StatelessWidget {
                         const SizedBox(height: 10),
                         _ActionCard(
                           icon: Icons.inventory_2_rounded,
-                          title: 'Debian shell',
-                          subtitle:
-                              'Open the optional minimal PRoot compatibility environment',
+                          title: l10n.debianShell,
+                          subtitle: l10n.debianShellSubtitle,
                           color: const Color(0xFFD70A53),
                           onTap: () => _showDebianTerminal(context, state),
                         ),
@@ -229,9 +222,8 @@ class HomeScreen extends StatelessWidget {
 
                       _ActionCard(
                         icon: Icons.apps_rounded,
-                        title: 'Add applications',
-                        subtitle:
-                            'Install applications or optional Debian compatibility',
+                        title: l10n.addApplications,
+                        subtitle: l10n.addApplicationsSubtitle,
                         color: DroidTheme.primaryLight,
                         onTap: () {
                           Navigator.of(context).push(
@@ -253,7 +245,7 @@ class HomeScreen extends StatelessWidget {
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
                   child: Text(
-                    'SYSTEM',
+                    l10n.systemSection,
                     style: DroidTheme.label,
                   ).animate().fadeIn(delay: 500.ms, duration: 400.ms),
                 ),
@@ -272,22 +264,22 @@ class HomeScreen extends StatelessWidget {
                     child: Column(
                       children: [
                         _infoRow(
-                          'Distribution',
+                          l10n.infoDistribution,
                           _distroLabel(state.installedDistro),
                         ),
                         _divider(),
-                        _infoRow('Desktop', state.selectedDE.toUpperCase()),
+                        _infoRow(l10n.infoDesktop, state.selectedDE.toUpperCase()),
                         _divider(),
                         _infoRow('GPU', state.gpuType),
                         _divider(),
                         _infoRow(
-                          'Renderer',
+                          l10n.infoRenderer,
                           state.deviceInfo['graphicsMode']?.toString() ??
-                              'Automatic',
+                              l10n.automatic,
                         ),
                         _divider(),
                         _infoRow(
-                          'Device',
+                          l10n.infoDevice,
                           '${state.deviceInfo['brand'] ?? ''} ${state.deviceInfo['model'] ?? ''}',
                         ),
                         _divider(),
@@ -298,12 +290,12 @@ class HomeScreen extends StatelessWidget {
                         _divider(),
                         _infoRow(
                           'RAM',
-                          '${state.deviceInfo['totalRamMB'] ?? 'N/A'} MB',
+                          '${state.deviceInfo['totalRamMB'] ?? l10n.notAvailable} MB',
                         ),
                         _divider(),
                         _infoRow(
-                          'Storage Free',
-                          '${state.deviceInfo['availableStorageMB'] ?? 'N/A'} MB',
+                          l10n.infoStorageFree,
+                          '${state.deviceInfo['availableStorageMB'] ?? l10n.notAvailable} MB',
                         ),
                       ],
                     ),
@@ -379,7 +371,7 @@ class HomeScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  state.isRunning ? 'Desktop Active' : 'Desktop Idle',
+                  state.isRunning ? l10n.desktopActive : l10n.desktopIdle,
                   style: DroidTheme.headingSm.copyWith(
                     color: state.isRunning
                         ? activeTitleColor
@@ -390,7 +382,7 @@ class HomeScreen extends StatelessWidget {
                 Text(
                   state.isRunning
                       ? '${state.selectedDE.toUpperCase()} · ${_distroLabel(state.installedDistro)}'
-                      : 'Tap "Launch Desktop" to start',
+                      : l10n.tapLaunchDesktop,
                   style: DroidTheme.bodySm.copyWith(
                     color: state.isRunning
                         ? activeSubtitleColor
@@ -441,7 +433,7 @@ class HomeScreen extends StatelessWidget {
       case 'kali':
         return 'Kali Linux';
       case 'termux-native':
-        return 'Termux Native';
+        return l10n.termuxNative;
       default:
         return distro;
     }
@@ -473,7 +465,7 @@ class HomeScreen extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Settings', style: DroidTheme.headingLg),
+                  Text(l10n.settings, style: DroidTheme.headingLg),
                   const SizedBox(height: 20),
 
                   // App Theme Section
@@ -489,13 +481,13 @@ class HomeScreen extends StatelessWidget {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('App Theme', style: DroidTheme.headingSm),
+                          Text(l10n.appTheme, style: DroidTheme.headingSm),
                           Text(
                             state.themeMode == ThemeMode.system
-                                ? 'System Default'
+                                ? l10n.systemDefaultTheme
                                 : state.isDarkMode
-                                    ? 'Dark Theme'
-                                    : 'Light Theme',
+                                    ? l10n.darkTheme
+                                    : l10n.lightTheme,
                             style: DroidTheme.bodySm,
                           ),
                         ],
@@ -506,20 +498,20 @@ class HomeScreen extends StatelessWidget {
                   SizedBox(
                     width: double.infinity,
                     child: SegmentedButton<ThemeMode>(
-                      segments: const [
+                      segments: [
                         ButtonSegment(
                           value: ThemeMode.dark,
-                          label: Text('Dark'),
+                          label: Text(l10n.themeDark),
                           icon: Icon(Icons.dark_mode_outlined, size: 16),
                         ),
                         ButtonSegment(
                           value: ThemeMode.light,
-                          label: Text('Light'),
+                          label: Text(l10n.themeLight),
                           icon: Icon(Icons.light_mode_outlined, size: 16),
                         ),
                         ButtonSegment(
                           value: ThemeMode.system,
-                          label: Text('System'),
+                          label: Text(l10n.themeSystem),
                           icon: Icon(Icons.brightness_auto_outlined, size: 16),
                         ),
                       ],
@@ -537,8 +529,8 @@ class HomeScreen extends StatelessWidget {
                       Icons.battery_charging_full,
                       color: DroidTheme.warning,
                     ),
-                    title: const Text('Battery Optimization'),
-                    subtitle: const Text('Disable to prevent session killing'),
+                    title: Text(l10n.batteryOptimization),
+                    subtitle: Text(l10n.batteryOptimizationSubtitle),
                     onTap: () {
                       DroidDeskPlatform.requestBatteryOptimization();
                       Navigator.pop(sheetContext);
@@ -550,10 +542,8 @@ class HomeScreen extends StatelessWidget {
                       Icons.home_rounded,
                       color: DroidTheme.primaryLight,
                     ),
-                    title: const Text('Set as default launcher'),
-                    subtitle: const Text(
-                      'Open the Linux desktop when the phone starts',
-                    ),
+                    title: Text(l10n.setDefaultLauncher),
+                    subtitle: Text(l10n.setDefaultLauncherSubtitle),
                     onTap: () {
                       Navigator.pop(sheetContext);
                       DroidDeskPlatform.requestDefaultLauncher();
@@ -569,8 +559,8 @@ class HomeScreen extends StatelessWidget {
                           Icons.home_outlined,
                           color: DroidTheme.error,
                         ),
-                        title: const Text('Stop using as default launcher'),
-                        subtitle: const Text('Choose another Home app directly'),
+                        title: Text(l10n.stopDefaultLauncher),
+                        subtitle: Text(l10n.stopDefaultLauncherSubtitle),
                         onTap: () {
                           Navigator.pop(sheetContext);
                           _confirmUnsetLauncher(pageContext);
@@ -584,8 +574,8 @@ class HomeScreen extends StatelessWidget {
                       Icons.auto_awesome_rounded,
                       color: DroidTheme.accent,
                     ),
-                    title: const Text('Desktop Tools'),
-                    subtitle: const Text('Manage dock apps and desktop backups'),
+                    title: Text(l10n.desktopTools),
+                    subtitle: Text(l10n.desktopToolsSubtitle),
                     onTap: () {
                       Navigator.pop(sheetContext);
                       Navigator.of(pageContext).push(
@@ -596,13 +586,13 @@ class HomeScreen extends StatelessWidget {
                   const Divider(height: 28),
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
-                    child: Text('Emergency Exit', style: DroidTheme.headingSm.copyWith(color: DroidTheme.error)),
+                    child: Text(l10n.emergencyExit, style: DroidTheme.headingSm.copyWith(color: DroidTheme.error)),
                   ),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(Icons.settings_rounded, color: DroidTheme.textSecondary),
-                    title: const Text('Android Settings'),
-                    subtitle: const Text('Open Android system settings directly'),
+                    title: Text(l10n.androidSettings),
+                    subtitle: Text(l10n.androidSettingsSubtitle),
                     onTap: () {
                       Navigator.pop(sheetContext);
                       DroidDeskPlatform.openAndroidControl('settings');
@@ -611,8 +601,8 @@ class HomeScreen extends StatelessWidget {
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: Icon(Icons.home_work_rounded, color: DroidTheme.textSecondary),
-                    title: const Text('Change Home App'),
-                    subtitle: const Text('Open Android Home app chooser'),
+                    title: Text(l10n.changeHomeApp),
+                    subtitle: Text(l10n.changeHomeAppSubtitle),
                     onTap: () {
                       Navigator.pop(sheetContext);
                       DroidDeskPlatform.openAndroidControl('home_settings');
@@ -621,8 +611,8 @@ class HomeScreen extends StatelessWidget {
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.phone_android_rounded, color: DroidTheme.error),
-                    title: const Text('Return to Samsung Home'),
-                    subtitle: const Text('Launch One UI Home directly'),
+                    title: Text(l10n.returnToSamsungHome),
+                    subtitle: Text(l10n.returnToSamsungHomeSubtitle),
                     onTap: () {
                       Navigator.pop(sheetContext);
                       DroidDeskPlatform.openAndroidControl('samsung_home');
@@ -632,30 +622,26 @@ class HomeScreen extends StatelessWidget {
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: const Icon(Icons.refresh, color: DroidTheme.secondary),
-                    title: const Text('Reinstall Linux'),
-                    subtitle: const Text('Re-download and set up rootfs'),
+                    title: Text(l10n.reinstallLinux),
+                    subtitle: Text(l10n.reinstallLinuxSubtitle),
                     onTap: () {
                       Navigator.pop(sheetContext);
                       showDialog<bool>(
                         context: pageContext,
                         builder: (dialogContext) => AlertDialog(
-                          title: const Text('Reinstall Linux Environment?'),
-                          content: const Text(
-                            'This will delete your installed Linux packages and desktop environment, '
-                            'then reinstall from scratch.\n\n'
-                            'Your home folder files will be preserved. This cannot be undone.',
-                          ),
+                          title: Text(l10n.reinstallLinuxTitle),
+                          content: Text(l10n.reinstallLinuxMessage),
                           actions: [
                             TextButton(
                               onPressed: () => Navigator.pop(dialogContext, false),
-                              child: const Text('Cancel'),
+                              child: Text(l10n.cancel),
                             ),
                             FilledButton(
                               style: FilledButton.styleFrom(
                                 backgroundColor: DroidTheme.error,
                               ),
                               onPressed: () => Navigator.pop(dialogContext, true),
-                              child: const Text('Reinstall'),
+                              child: Text(l10n.reinstall),
                             ),
                           ],
                         ),
@@ -679,18 +665,16 @@ class HomeScreen extends StatelessWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Change default launcher?'),
-        content: const Text(
-          'DroidDesk will stop opening automatically as your Home app. Android will ask you to choose another launcher.',
-        ),
+        title: Text(l10n.changeLauncherTitle),
+        content: Text(l10n.changeLauncherMessage),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+            child: Text(l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Change launcher'),
+            child: Text(l10n.changeLauncher),
           ),
         ],
       ),
@@ -818,7 +802,7 @@ class _TerminalSheetState extends State<_TerminalSheet> {
                             color: DroidTheme.primary,
                           ),
                           const SizedBox(width: 8),
-                          Text('Terminal', style: DroidTheme.headingSm),
+                          Text(l10n.terminal, style: DroidTheme.headingSm),
                           const Spacer(),
                           // Stop Command Button
                           IconButton(
@@ -829,20 +813,18 @@ class _TerminalSheetState extends State<_TerminalSheet> {
                             ),
                             onPressed: () {
                               widget.state.interruptCommand();
-                              widget.state.appendTerminalOutput(
-                                '\n^C (Command interrupted)\n',
-                              );
+                              widget.state.appendTerminalOutput(l10n.commandInterrupted);
                             },
-                            tooltip: 'Interrupt Command (Ctrl+C)',
+                            tooltip: l10n.interruptCommand,
                             splashRadius: 20,
                           ),
                           const SizedBox(width: 8),
                           Text(
                             widget.state.isProotTerminal
-                                ? 'compat · Debian PRoot'
+                                ? '${l10n.terminalModeCompat} · Debian PRoot'
                                 : widget.state.hasRoot
                                 ? 'chroot · ${_distroLabel(widget.state.installedDistro)}'
-                                : 'native · Termux/TUR',
+                                : '${l10n.terminalModeNative} · Termux/TUR',
                             style: DroidTheme.monoSm,
                           ),
                         ],
@@ -901,9 +883,9 @@ class _TerminalSheetState extends State<_TerminalSheet> {
                                 fontSize: 13,
                                 color: Colors.white,
                               ),
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 border: InputBorder.none,
-                                hintText: 'Enter command...',
+                                hintText: l10n.enterCommand,
                                 hintStyle: TextStyle(color: Color(0xFF94A3B8)),
                                 isDense: true,
                                 contentPadding: EdgeInsets.zero,

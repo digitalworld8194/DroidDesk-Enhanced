@@ -19,11 +19,6 @@ public class InputModesTest {
         assertEquals(InputModes.TOUCH, InputModes.toggle(3));
     }
 
-    @Test public void labelsShownOnButton() {
-        assertEquals("Trackpad", InputModes.label(InputModes.TRACKPAD));
-        assertEquals("Touch", InputModes.label(InputModes.TOUCH));
-    }
-
     @Test public void persistedModeRoundTrips() {
         assertEquals(InputModes.TRACKPAD, InputModes.fromStored(InputModes.toStored(InputModes.TRACKPAD)));
         assertEquals(InputModes.TOUCH, InputModes.fromStored(InputModes.toStored(InputModes.TOUCH)));

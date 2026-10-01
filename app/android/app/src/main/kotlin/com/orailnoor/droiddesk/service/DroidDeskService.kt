@@ -1,5 +1,6 @@
 package com.orailnoor.droiddesk.service
 
+import com.orailnoor.droiddesk.R
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -60,7 +61,7 @@ class DroidDeskService : Service() {
             return START_NOT_STICKY
         }
 
-        val notification = buildNotification("Linux desktop is running")
+        val notification = buildNotification(getString(R.string.service_desktop_running))
 
         ServiceCompat.startForeground(
             this,
@@ -90,10 +91,10 @@ class DroidDeskService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "DroidDesk Linux Service",
+                getString(R.string.service_channel_name),
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Keeps the Linux desktop environment running"
+                description = getString(R.string.service_channel_description)
                 setShowBadge(false)
             }
             val manager = getSystemService(NotificationManager::class.java)
@@ -139,12 +140,12 @@ class DroidDeskService : Service() {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .addAction(
                 android.R.drawable.ic_menu_compass,
-                "Return to Desktop",
+                getString(R.string.service_action_return),
                 returnToDesktopIntent
             )
             .addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
-                "Stop Desktop",
+                getString(R.string.service_action_stop),
                 stopIntent
             )
             .build()

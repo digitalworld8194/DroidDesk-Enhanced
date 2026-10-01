@@ -5,6 +5,7 @@ import 'package:percent_indicator/circular_percent_indicator.dart';
 import 'package:droiddesk/theme/droid_theme.dart';
 import 'package:droiddesk/state/app_state.dart';
 import 'package:droiddesk/screens/home_screen.dart';
+import 'package:droiddesk/l10n/app_strings.dart';
 
 /// Setup progress screen — step 3 of setup wizard.
 /// Shows download, extraction, and configuration progress.
@@ -43,18 +44,16 @@ class _SetupProgressScreenState extends State<SetupProgressScreen> {
                 color: DroidTheme.warning,
                 size: 38,
               ),
-              title: const Text('Low storage'),
-              content: Text(
-                'Only $freeStorage MB is available. Desktop Essentials works best with at least 2 GB free. You can continue, but package installation may fail.',
-              ),
+              title: Text(l10n.lowStorageTitle),
+              content: Text(l10n.lowStorageMessage(freeStorage)),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(dialogContext, false),
-                  child: const Text('Go back'),
+                  child: Text(l10n.goBack),
                 ),
                 ElevatedButton(
                   onPressed: () => Navigator.pop(dialogContext, true),
-                  child: const Text('Continue anyway'),
+                  child: Text(l10n.continueAnyway),
                 ),
               ],
             ),
@@ -82,19 +81,16 @@ class _SetupProgressScreenState extends State<SetupProgressScreen> {
                 color: DroidTheme.accent,
                 size: 38,
               ),
-              title: const Text('Root access detected'),
-              content: const Text(
-                'Your device is rooted. Continue with the rooted chroot '
-                'runtime for the best performance and full Linux support?',
-              ),
+              title: Text(l10n.rootDetectedTitle),
+              content: Text(l10n.rootDetectedMessage),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(dialogContext, false),
-                  child: const Text('Cancel'),
+                  child: Text(l10n.cancel),
                 ),
                 ElevatedButton(
                   onPressed: () => Navigator.pop(dialogContext, true),
-                  child: const Text('Continue with root'),
+                  child: Text(l10n.continueWithRoot),
                 ),
               ],
             ),
@@ -133,9 +129,7 @@ class _SetupProgressScreenState extends State<SetupProgressScreen> {
                   alignment: Alignment.topRight,
                   child: IconButton(
                     onPressed: () => state.toggleThemeMode(),
-                    tooltip: state.isDarkMode
-                        ? 'Switch to Light Theme'
-                        : 'Switch to Dark Theme',
+                    tooltip: l10n.themeToggleTooltip(state.isDarkMode),
                     icon: Icon(
                       state.isDarkMode
                           ? Icons.light_mode_rounded
@@ -241,7 +235,7 @@ class _SetupProgressScreenState extends State<SetupProgressScreen> {
                           borderRadius: BorderRadius.circular(14),
                         ),
                       ),
-                      child: const Text('Retry'),
+                      child: Text(l10n.retry),
                     ),
                   ),
                 ] else if (phase.complete) ...[
@@ -263,10 +257,10 @@ class _SetupProgressScreenState extends State<SetupProgressScreen> {
                               borderRadius: BorderRadius.circular(14),
                             ),
                           ),
-                          child: const Row(
+                          child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Text('Launch DroidDesk'),
+                              Text(l10n.launchDroidDesk),
                               SizedBox(width: 8),
                               Icon(Icons.rocket_launch_rounded, size: 20),
                             ],
@@ -297,23 +291,23 @@ class _SetupProgressScreenState extends State<SetupProgressScreen> {
       final progress = state.extractProgress;
       return _checklistColumn([
         _ChecklistItem(
-          label: 'Bootstrap environment',
+          label: l10n.stepBootstrap,
           done: progress >= 0.08,
           active: progress < 0.08,
           progress: progress < 0.08 ? progress / 0.08 : null,
         ),
         _ChecklistItem(
-          label: 'Configure package repositories',
+          label: l10n.stepConfigureRepositories,
           done: progress >= 0.24,
           active: progress >= 0.08 && progress < 0.24,
         ),
         _ChecklistItem(
-          label: 'Install Desktop Essentials',
+          label: l10n.stepInstallEssentials,
           done: progress >= 0.70,
           active: progress >= 0.24 && progress < 0.70,
         ),
         _ChecklistItem(
-          label: 'Finalize Desktop Essentials',
+          label: l10n.stepFinalizeEssentials,
           done: state.isSetupComplete,
           active: progress >= 0.70 && !state.isSetupComplete,
         ),
@@ -322,26 +316,26 @@ class _SetupProgressScreenState extends State<SetupProgressScreen> {
 
     final steps = [
       _ChecklistItem(
-        label: isChroot ? 'Root access confirmed' : 'Bootstrap environment',
+        label: isChroot ? l10n.stepRootConfirmed : l10n.stepBootstrap,
         done:
             state.hasRoot ||
             (!state.isDownloading && state.downloadProgress == 0),
         active: false,
       ),
       _ChecklistItem(
-        label: isChroot ? 'Download Ubuntu rootfs' : 'Install native packages',
+        label: isChroot ? l10n.stepDownloadUbuntuRootfs : l10n.stepInstallNativePackages,
         done: state.downloadProgress >= 1.0,
         active: state.isDownloading,
         progress: state.isDownloading ? state.downloadProgress : null,
       ),
       _ChecklistItem(
-        label: isChroot ? 'Extract rootfs' : 'Configure desktop',
+        label: isChroot ? l10n.stepExtractRootfs : l10n.stepConfigureDesktop,
         done: state.extractProgress >= 1.0,
         active: state.isExtracting,
         progress: state.isExtracting ? state.extractProgress : null,
       ),
       _ChecklistItem(
-        label: 'Configure Linux',
+        label: l10n.stepConfigureLinux,
         done: state.isSetupComplete,
         active: state.extractProgress >= 1.0 && !state.isSetupComplete,
       ),
@@ -444,7 +438,7 @@ class _SetupProgressScreenState extends State<SetupProgressScreen> {
   _PhaseInfo _getPhase(AppState state) {
     if (state.errorMessage != null) {
       return _PhaseInfo(
-        title: 'Setup Failed',
+        title: l10n.phaseSetupFailed,
         message: state.errorMessage!,
         progress: 0,
         icon: Icons.error_outline_rounded,
@@ -455,10 +449,10 @@ class _SetupProgressScreenState extends State<SetupProgressScreen> {
 
     if (state.isDownloading) {
       return _PhaseInfo(
-        title: 'Downloading',
+        title: l10n.phaseDownloading,
         message: state.downloadStatus.isNotEmpty
             ? state.downloadStatus
-            : 'Preparing download...',
+            : l10n.preparingDownload,
         progress: state.downloadProgress * 0.5, // 0–50% of total
         icon: Icons.cloud_download_rounded,
         error: false,
@@ -470,11 +464,11 @@ class _SetupProgressScreenState extends State<SetupProgressScreen> {
       if (!state.hasRoot) {
         return _PhaseInfo(
           title: state.extractProgress < 0.08
-              ? 'Preparing Runtime'
-              : 'Installing Native Linux',
+              ? l10n.phasePreparingRuntime
+              : l10n.phaseInstallingNativeLinux,
           message: state.extractStatus.isNotEmpty
               ? state.extractStatus
-              : 'Preparing native Termux environment...',
+              : l10n.preparingNativeTermux,
           progress: state.extractProgress,
           icon: state.extractProgress < 0.08
               ? Icons.inventory_2_rounded
@@ -484,10 +478,10 @@ class _SetupProgressScreenState extends State<SetupProgressScreen> {
         );
       }
       return _PhaseInfo(
-        title: state.isInstallingDE ? 'Installing Desktop' : 'Extracting',
+        title: state.isInstallingDE ? l10n.phaseInstallingDesktop : l10n.phaseExtracting,
         message: state.extractStatus.isNotEmpty
             ? state.extractStatus
-            : 'Extracting filesystem...',
+            : l10n.extractingFilesystem,
         progress: 0.5 + state.extractProgress * 0.4, // 50–90% of total
         icon: state.isInstallingDE
             ? Icons.desktop_windows_rounded
@@ -499,8 +493,8 @@ class _SetupProgressScreenState extends State<SetupProgressScreen> {
 
     if (state.isSetupComplete) {
       return _PhaseInfo(
-        title: 'Setup Complete!',
-        message: 'Your Linux desktop is ready to launch.',
+        title: l10n.phaseSetupComplete,
+        message: l10n.setupCompleteMessage,
         progress: 1.0,
         icon: Icons.check_circle_rounded,
         error: false,
@@ -510,8 +504,8 @@ class _SetupProgressScreenState extends State<SetupProgressScreen> {
 
     // Default: not started yet
     return _PhaseInfo(
-      title: 'Setting Up',
-      message: 'Initializing...',
+      title: l10n.phaseSettingUp,
+      message: l10n.initializing,
       progress: 0,
       icon: Icons.settings_rounded,
       error: false,

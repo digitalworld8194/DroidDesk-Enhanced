@@ -1,5 +1,6 @@
 package com.orailnoor.droiddesk.runtime
 
+import com.orailnoor.droiddesk.R
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -436,9 +437,9 @@ object AndroidAppBridge {
         val installed = context.packageManager.getLaunchIntentForPackage(packageName) != null
         val message = when {
             packageName == TERMUX_PACKAGE && !installed ->
-                "Termux ($TERMUX_PACKAGE) is not installed. Install Termux to use the Terminal button."
-            !installed -> "Android app $packageName is not installed"
-            else -> "Could not open Android app $packageName"
+                context.getString(R.string.bridge_termux_missing, TERMUX_PACKAGE)
+            !installed -> context.getString(R.string.bridge_app_not_installed, packageName)
+            else -> context.getString(R.string.bridge_app_open_failed, packageName)
         }
         Log.w(TAG, message)
         Handler(Looper.getMainLooper()).post {

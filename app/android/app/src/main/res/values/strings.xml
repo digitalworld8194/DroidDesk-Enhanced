@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  User-visible texts of the native Android layer. Spanish is the default
+  language: add values-en/strings.xml or values-pt/strings.xml with the same
+  names to provide English or Portuguese. The Flutter UI has its own strings in
+  lib/l10n/. The app label itself comes from build.gradle.kts (appLabel).
+-->
+<resources>
+    <!-- Desktop loading screen -->
+    <string-array name="desktop_loading_messages">
+        <item>Despertando tu espacio de trabajo Linux portátil</item>
+        <item>Conectando Android con tu escritorio Linux</item>
+        <item>Iniciando el motor del escritorio y los servicios</item>
+        <item>Cargando tus apps, iconos y accesos directos</item>
+        <item>Puliendo paneles, fondo de pantalla y espacio de trabajo</item>
+        <item>Casi listo para tu próxima gran idea</item>
+    </string-array>
+    <plurals name="desktop_loading_remaining">
+        <item quantity="one">Queda aproximadamente %1$d segundo</item>
+        <item quantity="many">Quedan aproximadamente %1$d segundos</item>
+        <item quantity="other">Quedan aproximadamente %1$d segundos</item>
+    </plurals>
+    <string name="desktop_loading_finishing">Terminando…</string>
+    <string name="desktop_loading_description">Cargando el escritorio Linux</string>
+
+    <!-- Desktop controls -->
+    <string name="desktop_controls_drag">Mover los controles del escritorio</string>
+    <string name="desktop_controls_hide">Ocultar los controles del escritorio</string>
+    <string name="desktop_controls_show">Mostrar los controles del escritorio</string>
+    <string name="desktop_control_keyboard">Teclado</string>
+    <string name="input_mode_trackpad">Trackpad</string>
+    <string name="input_mode_touch">Táctil</string>
+    <string name="input_mode_changed">Modo de entrada: %1$s</string>
+    <string name="trackpad_sensitivity">Sensibilidad del trackpad</string>
+    <string name="trackpad_sensitivity_value">Sensibilidad del trackpad: %1$d%%</string>
+    <string name="x11_error">Error de X11: %1$s</string>
+
+    <!-- Foreground service notification -->
+    <string name="service_channel_name">Servicio Linux de DroidDesk</string>
+    <string name="service_channel_description">Mantiene en ejecución el entorno de escritorio Linux</string>
+    <string name="service_desktop_running">El escritorio Linux está en ejecución</string>
+    <string name="service_action_return">Volver al escritorio</string>
+    <string name="service_action_stop">Detener escritorio</string>
+
+    <!-- Launcher / setup toasts -->
+    <string name="auto_setup_requires_root">La configuración automática requiere root</string>
+    <string name="auto_setup_failed">La configuración automática falló: %1$s</string>
+    <string name="native_setup_failed">La configuración de Linux nativo falló. Revisa el registro de instalación.</string>
+    <string name="already_default_launcher">DroidDesk ya es la app de inicio predeterminada</string>
+    <string name="choose_home_app">Elige tu app de inicio</string>
+    <string name="select_other_home_app">Android requiere que elijas otra app de inicio predeterminada</string>
+
+    <!-- Android app bridge -->
+    <string name="bridge_termux_missing">Termux (%1$s) no está instalado. Instala Termux para usar el botón Terminal.</string>
+    <string name="bridge_app_not_installed">La app de Android %1$s no está instalada</string>
+    <string name="bridge_app_open_failed">No se pudo abrir la app de Android %1$s</string>
+
+    <!-- Desktop search shortcuts -->
+    <string name="search_home_folder">Carpeta personal</string>
+    <string name="search_home_folder_subtitle">Tus archivos de Linux</string>
+    <string name="search_downloads">Descargas</string>
+    <string name="search_downloads_subtitle">Archivos descargados</string>
+    <string name="search_documents">Documentos</string>
+    <string name="search_documents_subtitle">Carpeta de documentos</string>
+    <string name="search_pictures">Imágenes</string>
+    <string name="search_pictures_subtitle">Carpeta de imágenes</string>
+    <string name="search_wifi">Ajustes de Wi-Fi</string>
+    <string name="search_wifi_subtitle">Gestionar las redes de Android</string>
+    <string name="search_bluetooth">Ajustes de Bluetooth</string>
+    <string name="search_bluetooth_subtitle">Gestionar los dispositivos de Android</string>
+    <string name="search_display">Ajustes de pantalla</string>
+    <string name="search_display_subtitle">Brillo y pantalla</string>
+    <string name="search_sound">Ajustes de sonido</string>
+    <string name="search_sound_subtitle">Volumen y audio</string>
+    <string name="search_hotspot">Ajustes de punto de acceso</string>
+    <string name="search_hotspot_subtitle">Compartir internet móvil</string>
+    <string name="snapshot_wrong_runtime">Esta copia pertenece a otro modo de ejecución de Linux</string>
+
+    <!-- XFCE panel launchers -->
+    <string name="launcher_terminal">Terminal</string>
+    <string name="launcher_terminal_comment">Abrir la terminal de Linux</string>
+    <string name="launcher_files">Archivos</string>
+    <string name="launcher_files_comment">Explorar archivos</string>
+    <string name="launcher_browser">Navegador web</string>
+    <string name="launcher_browser_comment">Navegar por la web</string>
+    <string name="launcher_firefox_comment">Navegar por la web con Firefox</string>
+    <string name="launcher_camera">Cámara</string>
+    <string name="launcher_camera_comment">Abrir la cámara de Android</string>
+
+    <!-- Setup and package progress -->
+    <string name="progress_connecting_download">Conectando con el servidor de descarga...</string>
+    <string name="progress_already_downloaded">%1$s ya está descargado</string>
+    <string name="progress_downloading">Descargando %1$s: %2$d MB / %3$d MB</string>
+    <string name="progress_downloaded">%1$s se descargó correctamente</string>
+    <string name="progress_download_failed">La descarga falló: %1$s</string>
+    <string name="progress_tarball_missing">No se encontró el archivo del rootfs. Descárgalo primero.</string>
+    <string name="progress_extracting_distro">Extrayendo %1$s...</string>
+    <string name="progress_extracting_file">Extrayendo: %1$s</string>
+    <string name="progress_configuring_linux">Configurando el entorno Linux...</string>
+    <string name="progress_distro_setup_complete">Configuración de %1$s completa</string>
+    <string name="progress_extraction_failed">La extracción falló: %1$s</string>
+    <string name="progress_clearing_locks">Liberando los bloqueos del gestor de paquetes...</string>
+    <string name="progress_updating_package_lists">Actualizando las listas de paquetes...</string>
+    <string name="progress_configuring_repositories">Configurando repositorios...</string>
+    <string name="progress_installing_desktop_packages">Instalando los paquetes de %1$s...</string>
+    <string name="progress_installing_core_utilities">Instalando utilidades básicas...</string>
+    <string name="progress_configuring_x11">Configurando la pantalla X11 integrada...</string>
+    <string name="progress_desktop_installed">¡Instalación de %1$s completa!</string>
+    <string name="progress_installation_failed">La instalación falló: %1$s</string>
+    <string name="progress_root_required">Se necesita acceso root para el modo chroot</string>
+    <string name="progress_rootfs_not_ready">El rootfs no está listo. Descárgalo y extráelo primero.</string>
+    <string name="progress_mounting_rootfs">Montando el rootfs...</string>
+    <string name="progress_configuring_language">Configurando el idioma español...</string>
+    <string name="progress_installing_core_tools">Instalando herramientas básicas...</string>
+    <string name="progress_installing_mesa">Instalando los controladores gráficos Mesa...</string>
+    <string name="progress_installing_desktop_environment">Instalando el entorno de escritorio...</string>
+    <string name="progress_installing_essentials_tools">Instalando las herramientas de los componentes esenciales...</string>
+    <string name="progress_cleaning_up">Limpiando...</string>
+    <string name="progress_already_installed">Ya está instalado</string>
+    <string name="progress_repairing_packages">Reparando paquetes interrumpidos...</string>
+    <string name="progress_installing_optional_app">Instalando la aplicación opcional...</string>
+    <string name="progress_installation_complete">Instalación completa</string>
+    <string name="progress_retrying_repositories">Actualizando los repositorios y reintentando...</string>
+    <string name="progress_installing_proot">Instalando el entorno PRoot ligero...</string>
+    <string name="progress_downloading_debian">Descargando el sistema base mínimo de Debian...</string>
+    <string name="progress_creating_debian_shortcut">Creando el acceso directo a la shell de Debian...</string>
+    <string name="progress_debian_ready">La compatibilidad mínima con Debian está lista</string>
+    <string name="progress_desktop_already_installed">%1$s ya está instalado</string>
+    <string name="progress_configuring_x11_tur">Configurando los repositorios X11 y TUR...</string>
+    <string name="progress_updating_native_database">Actualizando la base de datos de paquetes nativos...</string>
+    <string name="progress_installing_x11_audio">Instalando los paquetes de X11 y audio...</string>
+    <string name="progress_installing_mesa_packages">Instalando los paquetes gráficos Mesa...</string>
+    <string name="progress_installing_adreno">Instalando la aceleración por hardware Adreno...</string>
+    <string name="progress_finalizing_native">Finalizando el entorno Linux nativo...</string>
+    <string name="progress_native_setup_complete">Configuración de Linux nativo completa</string>
+    <string name="progress_preparing_nodejs">Preparando la dependencia reubicada de Node.js...</string>
+    <string name="progress_installing_named">Instalando %1$s...</string>
+    <string name="progress_installing_npm_dependency">Instalando la dependencia de npm...</string>
+    <string name="progress_optional_install_failed">La instalación falló. Revisa el registro de paquetes y vuelve a intentarlo.</string>
+    <string name="progress_invalid_package">Nombre de paquete no válido</string>
+    <string name="progress_repairing_operations">Reparando operaciones de paquetes interrumpidas...</string>
+    <string name="progress_installation_cancelled">Instalación cancelada</string>
+    <string name="progress_installing_with_dependencies">Instalando %1$s y sus dependencias...</string>
+    <string name="progress_package_installed">%1$s instalado</string>
+    <string name="progress_package_install_failed">La instalación de %1$s falló</string>
+    <string name="progress_package_required">DroidDesk necesita este paquete</string>
+    <string name="progress_removing_package">Desinstalando %1$s...</string>
+    <string name="progress_removal_cancelled">Desinstalación cancelada</string>
+    <string name="progress_package_removed">%1$s desinstalado</string>
+    <string name="progress_package_removal_failed">La desinstalación de %1$s falló</string>
+</resources>

@@ -1,5 +1,6 @@
 package com.orailnoor.droiddesk.view
 
+import com.orailnoor.droiddesk.R
 import android.app.Activity
 import android.os.Build
 import android.os.Bundle
@@ -64,14 +65,9 @@ class DesktopActivity : Activity() {
     private var loadingMessageIndex = 0
     private var loadingStartedAt = 0L
     private var estimatedLoadingSeconds = 30
-    private val loadingMessages = listOf(
-        "Waking up your portable Linux workspace",
-        "Connecting Android to your Linux desktop",
-        "Starting the desktop engine and services",
-        "Loading your apps, icons, and shortcuts",
-        "Polishing your panels, wallpaper, and workspace",
-        "Almost ready for your next big idea",
-    )
+    private val loadingMessages by lazy {
+        resources.getStringArray(R.array.desktop_loading_messages).toList()
+    }
     private val loadingMessageTicker = object : Runnable {
         override fun run() {
             val status = loadingStatus ?: return
@@ -93,9 +89,9 @@ class DesktopActivity : Activity() {
             val elapsedSeconds = ((android.os.SystemClock.elapsedRealtime() - loadingStartedAt) / 1_000).toInt()
             val remaining = (estimatedLoadingSeconds - elapsedSeconds).coerceAtLeast(0)
             estimate.text = if (remaining > 0) {
-                "About $remaining seconds remaining"
+                loadingRemainingText(remaining)
             } else {
-                "Finishing up…"
+                getString(R.string.desktop_loading_finishing)
             }
             estimate.contentDescription = estimate.text
             if (!desktopRevealed) loadingMessageHandler.postDelayed(this, 1_000)
@@ -291,28 +287,32 @@ class DesktopActivity : Activity() {
         }
 
         val dragHandle = controlButton("⋮").apply {
-            contentDescription = "Drag desktop controls"
+            contentDescription = getString(R.string.desktop_controls_drag)
             setPadding((8 * density).toInt(), 0, (8 * density).toInt(), 0)
         }
-        val keyboardButton = controlButton("Keyboard").apply {
+        val keyboardButton = controlButton(getString(R.string.desktop_control_keyboard)).apply {
             setOnClickListener { showKeyboard() }
         }
-        inputModeButton = controlButton(inputController?.modeLabel() ?: "Trackpad").apply {
+        inputModeButton = controlButton(inputModeLabel()).apply {
             setOnClickListener {
                 inputController?.nextMode()
-                text = inputController?.modeLabel() ?: "Trackpad"
+                text = inputModeLabel()
                 updateSensitivityVisibility()
-                Toast.makeText(this@DesktopActivity, "Input mode: $text", Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    this@DesktopActivity,
+                    getString(R.string.input_mode_changed, text),
+                    Toast.LENGTH_SHORT,
+                ).show()
             }
         }
         sensitivityButton = controlButton(sensitivityButtonLabel()).apply {
-            contentDescription = "Trackpad sensitivity"
+            contentDescription = getString(R.string.trackpad_sensitivity)
             setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
             setOnClickListener { toggleSensitivityPanel() }
         }
         sensitivityPanel = buildSensitivityPanel(density)
         val hideButton = controlButton("−").apply {
-            contentDescription = "Hide desktop controls"
+            contentDescription = getString(R.string.desktop_controls_hide)
             setOnClickListener { setControlsCollapsed(true) }
             setPadding((9 * density).toInt(), 0, (9 * density).toInt(), 0)
         }
@@ -356,7 +356,7 @@ class DesktopActivity : Activity() {
         updateSensitivityVisibility()
 
         collapsedControl = controlButton("☰").apply {
-            contentDescription = "Show desktop controls"
+            contentDescription = getString(R.string.desktop_controls_show)
             // Keep this measured so switching from a dragged full overlay can
             // copy absolute coordinates without placing the restore handle off-screen.
             visibility = View.INVISIBLE
@@ -401,10 +401,10 @@ class DesktopActivity : Activity() {
         val title = TextView(this).apply {
             setTextColor(Color.WHITE)
             textSize = 13f
-            text = TrackpadSensitivity.label(inputController?.sensitivityPercent ?: TrackpadSensitivity.DEFAULT)
+            text = sensitivityLabel(inputController?.sensitivityPercent ?: TrackpadSensitivity.DEFAULT)
         }
         val slider = SeekBar(this).apply {
-            contentDescription = "Trackpad sensitivity"
+            contentDescription = getString(R.string.trackpad_sensitivity)
             max = TrackpadSensitivity.stopCount() - 1
             progress = TrackpadSensitivity.stopIndex(inputController?.sensitivityPercent ?: TrackpadSensitivity.DEFAULT)
             progressTintList = ColorStateList.valueOf(Color.rgb(96, 165, 250))
@@ -425,7 +425,7 @@ class DesktopActivity : Activity() {
             }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
         fun show(percent: Int) {
-            title.text = TrackpadSensitivity.label(percent)
+            title.text = sensitivityLabel(percent)
             sensitivityButton?.text = "$percent%"
         }
         slider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -612,7 +612,7 @@ class DesktopActivity : Activity() {
         content.addView(ProgressBar(this).apply {
             isIndeterminate = true
             indeterminateTintList = ColorStateList.valueOf(Color.WHITE)
-            contentDescription = "Loading Linux desktop"
+            contentDescription = getString(R.string.desktop_loading_description)
         }, LinearLayout.LayoutParams(
             (42 * density).toInt(),
             (42 * density).toInt(),
@@ -632,7 +632,7 @@ class DesktopActivity : Activity() {
             ).apply { topMargin = (14 * density).toInt() })
         }
         loadingEstimate = TextView(this).apply {
-            text = "About $estimatedLoadingSeconds seconds remaining"
+            text = loadingRemainingText(estimatedLoadingSeconds)
             textSize = 12f
             setTextColor(Color.rgb(130, 143, 164))
             gravity = Gravity.CENTER
@@ -688,8 +688,18 @@ class DesktopActivity : Activity() {
 
     private fun showX11Error(message: String, error: Throwable?) {
         Log.e(TAG, message, error)
-        Toast.makeText(this, "X11 Error: $message", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, getString(R.string.x11_error, message), Toast.LENGTH_LONG).show()
     }
+
+    private fun loadingRemainingText(seconds: Int): String =
+        resources.getQuantityString(R.plurals.desktop_loading_remaining, seconds, seconds)
+
+    private fun inputModeLabel(): String = getString(
+        if (inputController?.isTrackpadMode == false) R.string.input_mode_touch else R.string.input_mode_trackpad,
+    )
+
+    private fun sensitivityLabel(percent: Int): String =
+        getString(R.string.trackpad_sensitivity_value, percent)
 
     override fun onDestroy() {
         clipboardSync?.stop()

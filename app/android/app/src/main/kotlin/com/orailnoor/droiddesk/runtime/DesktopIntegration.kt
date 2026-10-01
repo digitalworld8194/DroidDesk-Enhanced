@@ -1,5 +1,6 @@
 package com.orailnoor.droiddesk.runtime
 
+import com.orailnoor.droiddesk.R
 import android.content.Context
 import android.util.Log
 import java.io.BufferedInputStream
@@ -58,15 +59,15 @@ class DesktopIntegration(private val context: Context) {
         }
 
         val shortcuts = listOf(
-            mapOf("label" to "Home folder", "subtitle" to "Your Linux files", "source" to "Files", "kind" to "folder", "id" to "home"),
-            mapOf("label" to "Downloads", "subtitle" to "Downloaded files", "source" to "Files", "kind" to "folder", "id" to "Downloads"),
-            mapOf("label" to "Documents", "subtitle" to "Documents folder", "source" to "Files", "kind" to "folder", "id" to "Documents"),
-            mapOf("label" to "Pictures", "subtitle" to "Pictures folder", "source" to "Files", "kind" to "folder", "id" to "Pictures"),
-            mapOf("label" to "Wi-Fi settings", "subtitle" to "Manage Android networks", "source" to "Settings", "kind" to "setting", "id" to "wifi"),
-            mapOf("label" to "Bluetooth settings", "subtitle" to "Manage Android devices", "source" to "Settings", "kind" to "setting", "id" to "bluetooth"),
-            mapOf("label" to "Display settings", "subtitle" to "Brightness and screen", "source" to "Settings", "kind" to "setting", "id" to "display"),
-            mapOf("label" to "Sound settings", "subtitle" to "Volume and audio", "source" to "Settings", "kind" to "setting", "id" to "sound"),
-            mapOf("label" to "Hotspot settings", "subtitle" to "Share mobile internet", "source" to "Settings", "kind" to "setting", "id" to "hotspot"),
+            mapOf("label" to context.getString(R.string.search_home_folder), "subtitle" to context.getString(R.string.search_home_folder_subtitle), "source" to "Files", "kind" to "folder", "id" to "home"),
+            mapOf("label" to context.getString(R.string.search_downloads), "subtitle" to context.getString(R.string.search_downloads_subtitle), "source" to "Files", "kind" to "folder", "id" to "Downloads"),
+            mapOf("label" to context.getString(R.string.search_documents), "subtitle" to context.getString(R.string.search_documents_subtitle), "source" to "Files", "kind" to "folder", "id" to "Documents"),
+            mapOf("label" to context.getString(R.string.search_pictures), "subtitle" to context.getString(R.string.search_pictures_subtitle), "source" to "Files", "kind" to "folder", "id" to "Pictures"),
+            mapOf("label" to context.getString(R.string.search_wifi), "subtitle" to context.getString(R.string.search_wifi_subtitle), "source" to "Settings", "kind" to "setting", "id" to "wifi"),
+            mapOf("label" to context.getString(R.string.search_bluetooth), "subtitle" to context.getString(R.string.search_bluetooth_subtitle), "source" to "Settings", "kind" to "setting", "id" to "bluetooth"),
+            mapOf("label" to context.getString(R.string.search_display), "subtitle" to context.getString(R.string.search_display_subtitle), "source" to "Settings", "kind" to "setting", "id" to "display"),
+            mapOf("label" to context.getString(R.string.search_sound), "subtitle" to context.getString(R.string.search_sound_subtitle), "source" to "Settings", "kind" to "setting", "id" to "sound"),
+            mapOf("label" to context.getString(R.string.search_hotspot), "subtitle" to context.getString(R.string.search_hotspot_subtitle), "source" to "Settings", "kind" to "setting", "id" to "hotspot"),
         )
         results += shortcuts.filter { item ->
             needle.isEmpty() || item.values.any { it.lowercase().contains(needle) }
@@ -138,7 +139,7 @@ class DesktopIntegration(private val context: Context) {
             }
             val expectedMode = if (rooted) "chroot" else "native"
             require(snapshotMode == expectedMode) {
-                "This snapshot belongs to a different Linux runtime mode"
+                context.getString(R.string.snapshot_wrong_runtime)
             }
             rollback.deleteRecursively()
             return packages.distinct()

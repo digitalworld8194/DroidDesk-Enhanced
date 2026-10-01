@@ -173,10 +173,10 @@ void main() {
       expect(state.isDEInstalled, isFalse);
     });
 
-    test('gpuType returns Unknown GPU for empty vendor', () {
+    test('gpuType returns the unknown GPU label for empty vendor', () {
       final state = AppState();
       // deviceInfo is empty by default
-      expect(state.gpuType, equals('Unknown GPU'));
+      expect(state.gpuType, equals('GPU desconocida'));
     });
   });
 }
