@@ -44,7 +44,7 @@ if ((ci)); then
       --workflow build.yml --status success --limit 1 --json databaseId --jq '.[0].databaseId')
     [[ -n $run_id ]] || die "no successful CI run for $sha yet (gh run watch)"
   fi
-  gh run download "$run_id" --repo "$slug" \
+  TMPDIR="$work" gh run download "$run_id" --repo "$slug" \
     --pattern 'DroidDesk-Preview-release-*' --dir "$work/ci"
   source_apk=$(find "$work/ci" -name 'DroidDesk-Preview-release.apk' | head -1)
 fi
