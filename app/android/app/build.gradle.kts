@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -18,7 +20,7 @@ val droiddeskApplicationId = if (isPreviewBuild) "$originalApplicationId.preview
 // Permanent release key, kept outside the repository (see SIGNING.md). When the
 // properties file is absent (e.g. CI) release builds fall back to the debug key
 // and must be re-signed with scripts/sign-and-install.sh before installing.
-val releaseKeystoreProperties = java.util.Properties().apply {
+val releaseKeystoreProperties = Properties().apply {
     val path = System.getenv("DROIDDESK_KEYSTORE_PROPERTIES")
         ?: "${System.getProperty("user.home")}/.droiddesk-signing/keystore.properties"
     val file = File(path)
