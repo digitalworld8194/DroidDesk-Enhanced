@@ -8,10 +8,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import java.io.File
-import java.net.StandardProtocolFamily
-import java.net.UnixDomainSocketAddress
-import java.nio.channels.ServerSocketChannel
-import java.nio.channels.SocketChannel
 import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -177,25 +173,21 @@ class DesktopProbeTest {
         assertNull(SessionIdentity.verify(probe(), 31337, 4242, "xfce4-session", dbus))
     }
 
-    // ── X11 socket check (real Unix sockets) ──
+    // ── X11 socket check ──
+    // JVM unit tests exercise the injectable connection boundary. The real
+    // android.net.LocalSocket implementation is exercised only on Android.
 
-    private fun unixConnect(file: File) {
-        SocketChannel.open(StandardProtocolFamily.UNIX).use { it.connect(UnixDomainSocketAddress.of(file.toPath())) }
+    @Test fun displayAnswersWhenConnectSucceeds() {
+        assertTrue(DisplayCheck.answers(socket, connect = { }))
     }
 
-    @Test fun displayAnswersWhenAServerListens() {
-        val path = File(root, "live").toPath()
-        ServerSocketChannel.open(StandardProtocolFamily.UNIX).use { server ->
-            server.bind(UnixDomainSocketAddress.of(path))
-            assertTrue(DisplayCheck.answers(path.toFile(), connect = ::unixConnect))
-        }
-    }
-
-    @Test fun staleSocketFileIsNoDisplay() {
-        val path = File(root, "stale").toPath()
-        ServerSocketChannel.open(StandardProtocolFamily.UNIX).use { it.bind(UnixDomainSocketAddress.of(path)) }
-        assertTrue("socket file stays behind", path.toFile().exists())
-        assertFalse(DisplayCheck.answers(path.toFile(), connect = ::unixConnect))
+    @Test fun failedConnectIsNoDisplay() {
+        assertTrue("socket marker exists", socket.exists())
+        assertFalse(
+            DisplayCheck.answers(socket, connect = {
+                throw java.io.IOException("connection refused")
+            }),
+        )
     }
 
     @Test fun hangingConnectTimesOutAndStartsNoSecondThread() {
