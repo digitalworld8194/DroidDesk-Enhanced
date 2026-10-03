@@ -132,6 +132,28 @@ class ProotBackendTest {
         assertFalse(launcher, launcher.contains("--bind \"${tmp.absolutePath}:/tmp\""))
     }
 
+    @Test fun prepareCreatesSharedStorageMountPointAndBothLaunchersBindIt() {
+        installDebian()
+
+        val mountPoint = File(
+            prefix,
+            "var/lib/proot-distro/containers/debian/rootfs/mnt/phone",
+        )
+        assertFalse(mountPoint.exists())
+
+        backend().prepare()
+
+        assertTrue("Debian shared-storage mount point was not created", mountPoint.isDirectory)
+
+        listOf("start-debian", "debian-apps").forEach { name ->
+            val launcher = File(prefix, "bin/$name").readText()
+            assertTrue(
+                launcher,
+                launcher.contains("--bind \"/storage/emulated/0:/mnt/phone\""),
+            )
+        }
+    }
+
     @Test fun launchersUseThePackagedNativeProotLoader() {
         installDebian()
 

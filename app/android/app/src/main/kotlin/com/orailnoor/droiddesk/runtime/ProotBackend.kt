@@ -115,8 +115,22 @@ class ProotBackend(
     /** Launchers and relocation, done when installing or opening the container. */
     fun prepare() {
         relocateExecutable()
+        ensureSharedStorageMountPoint()
         writeLaunchers()
         clearDownloadCache()
+    }
+
+    /**
+     * Shared Android storage is exposed inside Debian at /mnt/phone.
+     * The destination must exist in the rootfs before PRoot binds it.
+     */
+    private fun ensureSharedStorageMountPoint() {
+        listOf(
+            File(distroDir, "containers/debian/rootfs"),
+            File(distroDir, "installed-rootfs/debian"),
+        ).firstOrNull { it.isDirectory }?.let { rootfs ->
+            File(rootfs, "mnt/phone").mkdirs()
+        }
     }
 
     fun clearDownloadCache() {
@@ -224,6 +238,7 @@ class ProotBackend(
             exec "${File(binDir, "proot-distro").absolutePath}" login debian \
                 --bind "${containerTmp.absolutePath}:/tmp" \
                 --bind "${x11Dir.absolutePath}:/tmp/.X11-unix" \
+                --bind "/storage/emulated/0:/mnt/phone" \
                 --env PROOT_TMP_DIR="${containerTmp.absolutePath}/proot"${loaderArguments} -- \
                 env DISPLAY="${'$'}DISPLAY" TERM="${'$'}{TERM:-xterm-256color}" bash -l
             """.trimIndent() + "\n",
@@ -241,6 +256,7 @@ class ProotBackend(
             exec "${File(binDir, "proot-distro").absolutePath}" login debian \
                 --bind "${containerTmp.absolutePath}:/tmp" \
                 --bind "${x11Dir.absolutePath}:/tmp/.X11-unix" \
+                --bind "/storage/emulated/0:/mnt/phone" \
                 --env PROOT_TMP_DIR="${containerTmp.absolutePath}/proot"${loaderArguments} -- \
                 bash -s -- "${'$'}mode" <<'DROIDDESK_DEBIAN_APPS'
             mode="${'$'}1"
