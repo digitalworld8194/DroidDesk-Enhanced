@@ -40,6 +40,7 @@ class DroidDeskService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        com.orailnoor.droiddesk.runtime.WirelessAdbKeeper.start(this)
         AndroidAppBridge.start(this)
         // Termux control bridge (droiddeskctl) stays reachable while the desktop runs.
         ControlBridge.acquire(this, CONTROL_OWNER)

@@ -206,6 +206,9 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // Keep Android's Wireless debugging switch enabled while DroidDesk lives.
+        com.orailnoor.droiddesk.runtime.WirelessAdbKeeper.start(this)
+
         flutterEngine
             .platformViewsController
             .registry
