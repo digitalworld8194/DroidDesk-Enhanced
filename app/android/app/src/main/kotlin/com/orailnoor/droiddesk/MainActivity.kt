@@ -852,7 +852,7 @@ class MainActivity : FlutterActivity() {
                     AndroidAppBridge.xfceDockCommand(this, homeDir) +
                         " DISPLAY=:0 xfce4-panel -r >/dev/null 2>&1 || true",
                     60_000,
-                ) { }
+                )
             }
         }
     }
