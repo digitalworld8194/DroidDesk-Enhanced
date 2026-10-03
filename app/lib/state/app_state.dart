@@ -5,7 +5,7 @@ import 'package:droiddesk/theme/droid_theme.dart';
 import 'package:droiddesk/l10n/app_strings.dart';
 
 /// Central state management for the entire DroidDesk app.
-class AppState extends ChangeNotifier {
+class AppState extends ChangeNotifier with WidgetsBindingObserver {
   // ── Theme State ──
   ThemeMode _themeMode = ThemeMode.dark;
 
@@ -36,9 +36,12 @@ class AppState extends ChangeNotifier {
   String _optionalInstallLog = '';
   bool _isProotTerminal = false;
 
-  // Terminal history
+  // Terminal history. The PRoot container has its own buffer so its output
+  // (or failure) never mixes into the native Termux terminal.
   final List<String> _terminalOutput = [l10n.terminalWelcome];
-  List<String> get terminalOutput => _terminalOutput;
+  final List<String> _containerOutput = [];
+  List<String> get terminalOutput =>
+      _isProotTerminal ? _containerOutput : _terminalOutput;
 
   // ── Device Info ──
   Map<String, dynamic> _deviceInfo = {};
@@ -88,7 +91,21 @@ class AppState extends ChangeNotifier {
 
   // ── Initialization ──
 
+  /// Re-reads the real desktop state when DroidDesk returns to the
+  /// foreground (e.g. from the desktop), so the card never stays stale.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState lifecycle) {
+    if (lifecycle == AppLifecycleState.resumed) refreshStatus();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
   Future<void> initialize() async {
+    WidgetsBinding.instance.addObserver(this);
     await _loadThemeMode();
 
     // Set up progress callbacks
@@ -131,6 +148,11 @@ class AppState extends ChangeNotifier {
         _isInstallingDE = false;
         refreshStatus();
       }
+      notifyListeners();
+    };
+
+    DroidDeskPlatform.onContainerOutput = (text) {
+      _appendLines(_containerOutput, text.replaceAll(RegExp(r'.*\r(?!\n)'), ''));
       notifyListeners();
     };
 
@@ -229,6 +251,8 @@ class AppState extends ChangeNotifier {
 
       notifyListeners();
     } catch (e) {
+      // Unknown state is never shown as "Escritorio activo".
+      _isRunning = false;
       _errorMessage = l10n.runtimeStatusFailed(_describeError(e));
       notifyListeners();
     }
@@ -440,8 +464,8 @@ class AppState extends ChangeNotifier {
       if (!started) {
         throw StateError(l10n.runtimeNotReady);
       }
-      _isRunning = true;
-      notifyListeners();
+      // "Escritorio activo" comes from the runtime's real detection.
+      await refreshStatus();
     } catch (e) {
       _errorMessage = l10n.startFailed(_describeError(e));
       notifyListeners();
@@ -490,6 +514,15 @@ class AppState extends ChangeNotifier {
 
   Future<String> executeCommand(String command) async {
     try {
+      if (_isProotTerminal) {
+        _containerOutput.add('\$ $command\n');
+        notifyListeners();
+        if (!await DroidDeskPlatform.containerInput(command)) {
+          _appendLines(_containerOutput, l10n.containerClosed);
+          notifyListeners();
+        }
+        return '';
+      }
       _terminalOutput.add('\$ $command\n');
       notifyListeners();
       return await DroidDeskPlatform.executeCommand(command);
@@ -503,15 +536,34 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Opens the Debian container in its own process and terminal buffer; the
+  /// native terminal, XFCE and D-Bus are not touched whatever PRoot does.
   Future<void> startDebianShell() async {
     _isProotTerminal = true;
-    clearTerminal();
-    await executeCommand('start-debian');
+    _containerOutput
+      ..clear()
+      ..add('');
+    notifyListeners();
+    try {
+      final exit = await DroidDeskPlatform.startContainerShell();
+      _appendLines(_containerOutput, l10n.containerExited(exit));
+    } catch (e) {
+      _appendLines(_containerOutput, l10n.containerExited(null));
+    }
+    notifyListeners();
+  }
+
+  static void _appendLines(List<String> buffer, String text) {
+    if (buffer.isEmpty) buffer.add('');
+    final lines = text.split('\n');
+    buffer[buffer.length - 1] += lines.first;
+    buffer.addAll(lines.skip(1));
   }
 
   void appendTerminalOutput(String output) {
-    if (_terminalOutput.isEmpty) _terminalOutput.add('');
-    _terminalOutput[_terminalOutput.length - 1] += output;
+    final buffer = terminalOutput;
+    if (buffer.isEmpty) buffer.add('');
+    buffer[buffer.length - 1] += output;
     notifyListeners();
   }
 
@@ -520,13 +572,23 @@ class AppState extends ChangeNotifier {
       error is StateError ? error.message : '$error';
 
   void clearTerminal() {
-    _terminalOutput.clear();
-    _terminalOutput.add(l10n.terminalWelcome);
+    if (_isProotTerminal) {
+      _containerOutput
+        ..clear()
+        ..add('');
+    } else {
+      _terminalOutput.clear();
+      _terminalOutput.add(l10n.terminalWelcome);
+    }
     notifyListeners();
   }
 
   Future<void> interruptCommand() async {
     try {
+      if (_isProotTerminal) {
+        await DroidDeskPlatform.stopContainerShell();
+        return;
+      }
       await DroidDeskPlatform.interruptCommand();
     } catch (e) {
       debugPrint("Error interrupting command: $e");

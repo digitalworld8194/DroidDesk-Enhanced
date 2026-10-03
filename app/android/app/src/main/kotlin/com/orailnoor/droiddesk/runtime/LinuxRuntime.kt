@@ -145,9 +145,22 @@ class LinuxRuntime(private val context: Context) {
         Log.i(TAG, "Cleared DE and bootstrap markers; packages preserved")
     }
 
-    fun isRunning(): Boolean {
-        return sessionProcess?.isAlive == true
-    }
+    /**
+     * A native session exists: the one DroidDesk launched, or a session
+     * manager that outlived an app restart. Used to avoid starting a second
+     * desktop; it does NOT mean the desktop is visible (see [desktopState]).
+     */
+    fun isRunning(): Boolean =
+        sessionProcess?.isAlive == true || DesktopProbe().sessionPresent(installedOrDefaultDE())
+
+    /** What really runs: session components in /proc and DISPLAY=:0 answering. */
+    fun desktopState(): DesktopProbe.State =
+        DesktopProbe().state(installedOrDefaultDE(), File(tmpDir, ".X11-unix/X0"))
+
+    /** "Escritorio activo": every component runs and the X display answers. */
+    fun isDesktopActive(): Boolean = desktopState().active
+
+    private fun installedOrDefaultDE(): String = getInstalledDE().ifEmpty { "xfce4" }
 
     fun getInstalledDE(): String {
         val marker = File(prefixDir, DE_MARKER)
@@ -172,107 +185,30 @@ class LinuxRuntime(private val context: Context) {
         "code_oss" to (File(binDir, "code-oss").exists() || File(binDir, "code").exists()),
         "nodejs" to (File(binDir, "node").exists() && File(binDir, "npm").exists()),
         "imagemagick" to (File(binDir, "magick").exists() || File(binDir, "convert").exists()),
-        "proot_debian" to isMinimalDebianInstalled(),
+        // Side-effect free: refreshing the native status never touches PRoot.
+        "proot_debian" to proot.isInstalled(),
     )
 
-    private fun isMinimalDebianInstalled(): Boolean {
-        val installed = debianRootfsMarkers().any(File::exists) &&
-            File(binDir, "start-debian").exists()
-        if (installed) {
-            relocateProotExecutable()
-            writeDebianLauncher()
-            clearProotDownloadCache()
-        }
-        return installed
-    }
-
-    private fun relocateProotExecutable() {
-        val proot = File(binDir, "proot")
-        if (!proot.isFile) return
-        patchElfFile(
-            proot,
-            "/data/data/com.termux/files/usr/lib",
-            File(prefixDir, "lib").absolutePath,
-            "/data/data/com.termux/files/usr/lib/dri",
+    /**
+     * The optional Debian container. It lives in its own backend with its own
+     * process so a PRoot failure never reaches the native terminal, the XFCE
+     * session or its D-Bus; the native desktop path never invokes PRoot.
+     */
+    val proot: ProotBackend
+        get() = ProotBackend(
+            prefixDir = prefixDir,
+            tmpDir = tmpDir,
+            environment = ::getTermuxEnv,
+            nativeLibraryDir = File(context.applicationInfo.nativeLibraryDir),
+            relocateElf = { file ->
+                patchElfFile(
+                    file,
+                    "/data/data/com.termux/files/usr/lib",
+                    File(prefixDir, "lib").absolutePath,
+                    "/data/data/com.termux/files/usr/lib/dri",
+                )
+            },
         )
-    }
-
-    private fun writeDebianLauncher() {
-        val launcher = File(binDir, "start-debian")
-        launcher.writeText(
-            """
-            #!${File(binDir, "bash").absolutePath}
-            export DISPLAY="${'$'}{DISPLAY:-:0}"
-            export TMPDIR="${tmpDir.absolutePath}"
-            mkdir -p "${tmpDir.absolutePath}/proot"
-            exec "${File(binDir, "proot-distro").absolutePath}" login debian \
-                --bind "${tmpDir.absolutePath}:/tmp" \
-                --env PROOT_TMP_DIR="${tmpDir.absolutePath}/proot" \
-                --env PROOT_LOADER="${File(prefixDir, "libexec/proot/loader").absolutePath}" \
-                --env PROOT_LOADER_32="${File(prefixDir, "libexec/proot/loader32").absolutePath}" -- \
-                env DISPLAY="${'$'}DISPLAY" TERM="${'$'}{TERM:-xterm-256color}" bash -l
-            """.trimIndent() + "\n",
-        )
-        launcher.setExecutable(true, false)
-
-        val appsLauncher = File(binDir, "debian-apps")
-        appsLauncher.writeText(
-            """
-            #!${File(binDir, "bash").absolutePath}
-            export TMPDIR="${tmpDir.absolutePath}"
-            mkdir -p "${tmpDir.absolutePath}/proot"
-            mode="${'$'}{1:-gui}"
-            exec "${File(binDir, "proot-distro").absolutePath}" login debian \
-                --bind "${tmpDir.absolutePath}:/tmp" \
-                --env PROOT_TMP_DIR="${tmpDir.absolutePath}/proot" \
-                --env PROOT_LOADER="${File(prefixDir, "libexec/proot/loader").absolutePath}" \
-                --env PROOT_LOADER_32="${File(prefixDir, "libexec/proot/loader32").absolutePath}" -- \
-                bash -s -- "${'$'}mode" <<'DROIDDESK_DEBIAN_APPS'
-            mode="${'$'}1"
-            case "${'$'}mode" in
-                --all)
-                    dpkg-query -W -f='${'$'}{binary:Package}\t${'$'}{Version}\n' | sort
-                    ;;
-                --manual)
-                    apt-mark showmanual | sort
-                    ;;
-                gui)
-                    for desktop in \
-                        /usr/share/applications/*.desktop \
-                        /usr/local/share/applications/*.desktop
-                    do
-                        [ -f "${'$'}desktop" ] || continue
-                        no_display=${'$'}(sed -n 's/^NoDisplay=//p' "${'$'}desktop" | head -n 1)
-                        [ "${'$'}no_display" = "true" ] && continue
-                        name=${'$'}(sed -n 's/^Name=//p' "${'$'}desktop" | head -n 1)
-                        command=${'$'}(sed -n 's/^Exec=//p' "${'$'}desktop" | head -n 1)
-                        [ -n "${'$'}name" ] && [ -n "${'$'}command" ] &&
-                            printf '%-32s %s\n' "${'$'}name" "${'$'}command"
-                    done | sort -f
-                    ;;
-                *)
-                    echo "Usage: debian-apps [--manual|--all]" >&2
-                    exit 2
-                    ;;
-            esac
-            DROIDDESK_DEBIAN_APPS
-            """.trimIndent() + "\n",
-        )
-        appsLauncher.setExecutable(true, false)
-    }
-
-    private fun clearProotDownloadCache() {
-        File(prefixDir, "var/lib/proot-distro/dlcache").deleteRecursively()
-        File(prefixDir, "var/lib/proot-distro/cache").deleteRecursively()
-    }
-
-    private fun debianRootfsMarkers(): List<File> = listOf(
-        // proot-distro 5.4+
-        File(prefixDir, "var/lib/proot-distro/containers/debian/rootfs/usr/lib/os-release"),
-        File(prefixDir, "var/lib/proot-distro/containers/debian/rootfs/etc/os-release"),
-        // Legacy proot-distro releases
-        File(prefixDir, "var/lib/proot-distro/installed-rootfs/debian/etc/os-release"),
-    )
 
     // ── Bootstrap ──
 
@@ -1087,7 +1023,7 @@ class LinuxRuntime(private val context: Context) {
             env["GALLIUM_DRIVER"] = "llvmpipe"
         }
 
-        env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=${tmpDir.absolutePath}/dbus-session"
+        env["DBUS_SESSION_BUS_ADDRESS"] = dbusAddress()
 
         env["DPKG_ADMINDIR"] = "${prefixDir.absolutePath}/var/lib/dpkg"
         env["APT_CONFIG"] = "${prefixDir.absolutePath}/etc/apt/apt.conf.d/99-droiddesk-paths.conf"
@@ -1385,30 +1321,35 @@ class LinuxRuntime(private val context: Context) {
         }
 
         patchShebangs(force = true)
-        relocateProotExecutable()
-        if (executeCommand("proot --version").startsWith("Error:")) {
+        val backend = proot
+        backend.relocateExecutable()
+        if (!backend.selfTest()) {
             Log.e(TAG, "Installed PRoot executable could not start")
             return false
         }
 
-        if (debianRootfsMarkers().none(File::exists)) {
+        if (!backend.hasRootfs()) {
             // Remove an interrupted extraction so proot-distro can safely retry.
-            File(prefixDir, "var/lib/proot-distro/containers/debian").deleteRecursively()
-            File(prefixDir, "var/lib/proot-distro/installed-rootfs/debian").deleteRecursively()
+            backend.removePartialRootfs()
             onProgress?.invoke(0.38, context.getString(R.string.progress_downloading_debian))
-            if (executeCommand("proot-distro install debian").startsWith("Error:")) {
+            // Own process (not the terminal's activeCommandProcess); cancellable from the store.
+            val install = runControlCommand(
+                "proot-distro install debian",
+                timeoutMs = 60 * 60_000L,
+                onOutput = { chunk -> installLogSink?.invoke(chunk) },
+                isCancelled = { packageOperationCancelled },
+            )
+            if (install.exitCode != 0) {
                 Log.e(TAG, "Minimal Debian rootfs installation failed")
                 return false
             }
         }
 
         onProgress?.invoke(0.9, context.getString(R.string.progress_creating_debian_shortcut))
-        writeDebianLauncher()
-
-        // The downloaded archive is not needed after extraction.
-        clearProotDownloadCache()
+        // Writes the launchers and drops the downloaded archive.
+        backend.prepare()
         onProgress?.invoke(1.0, context.getString(R.string.progress_debian_ready))
-        return isMinimalDebianInstalled()
+        return backend.isInstalled()
     }
 
     fun installDesktopEnvironmentNative(
@@ -2001,6 +1942,7 @@ class LinuxRuntime(private val context: Context) {
             }
             .start()
         sessionProcess = startedSession
+        recordSessionIdentity(startedSession, selectedDesktop, desktopCommand)
 
         Thread {
             try {
@@ -2053,20 +1995,16 @@ class LinuxRuntime(private val context: Context) {
 
     fun stopSession() {
         Log.i(TAG, "Stopping Linux session gracefully...")
+        // Only the session DroidDesk itself started is signalled: its PID is
+        // validated (UID, exact name, start time, D-Bus of this session) and
+        // signalled directly. No pkill/killall by name.
+        val identity = verifiedSessionPid()
+        if (identity != null) {
+            android.os.Process.sendSignal(identity, 15)
+        } else if (sessionProcess != null || sessionIdentityFile.exists()) {
+            Log.w(TAG, "Session identity could not be verified; no process was signalled")
+        }
         sessionProcess?.let { proc ->
-            // Ask the desktop session to exit cleanly first
-            try {
-                val bashBin = File(prefixDir, "bin/bash").absolutePath
-                ProcessBuilder(bashBin, "-c",
-                    "pkill -TERM xfce4-session; pkill -TERM mate-session; " +
-                    "pkill -TERM startlxqt; pkill -TERM plasmashell; true"
-                ).also { pb ->
-                    pb.environment().clear()
-                    pb.environment().putAll(getTermuxEnv())
-                }.start().waitFor()
-            } catch (e: Exception) {
-                Log.w(TAG, "Graceful TERM signal failed (non-fatal): ${e.message}")
-            }
             // Wait up to 3 seconds for clean exit before forcing
             val exited = proc.waitFor(3, java.util.concurrent.TimeUnit.SECONDS)
             if (!exited) {
@@ -2075,6 +2013,7 @@ class LinuxRuntime(private val context: Context) {
                 proc.waitFor()
             }
         }
+        sessionIdentityFile.delete()
         sessionProcess = null
 
         dbusProcess?.destroyForcibly()
@@ -2085,6 +2024,35 @@ class LinuxRuntime(private val context: Context) {
 
         Log.i(TAG, "Session stopped")
     }
+
+    /** "pid startTime comm" of the session DroidDesk started; survives app restarts. */
+    private val sessionIdentityFile: File get() = File(tmpDir, ".droiddesk-session")
+
+    private fun sessionCommName(desktopCommand: String): String = desktopCommand.take(15) // TASK_COMM_LEN
+
+    private fun recordSessionIdentity(process: Process, desktop: String, desktopCommand: String) {
+        val pid = processPid(process) ?: return
+        // bash -c ends with `exec <session>`, so this PID becomes the session manager.
+        val startTime = runCatching { DesktopProbe.startTime(File("/proc/$pid/stat").readText()) }.getOrNull() ?: return
+        runCatching {
+            sessionIdentityFile.writeText("$pid $startTime ${sessionCommName(desktopCommand)} $desktop\n")
+        }.onFailure { Log.w(TAG, "Could not record the session identity", it) }
+    }
+
+    /**
+     * The recorded session PID, only if that exact process still exists: same
+     * UID (only our processes are visible/readable), same start time (no PID
+     * reuse), exact session-manager name and this session's D-Bus address.
+     */
+    private fun verifiedSessionPid(): Int? {
+        val fields = runCatching { sessionIdentityFile.readText().trim().split(' ') }.getOrNull() ?: return null
+        val pid = fields.getOrNull(0)?.toIntOrNull() ?: return null
+        val startTime = fields.getOrNull(1)?.toLongOrNull() ?: return null
+        val comm = fields.getOrNull(2) ?: return null
+        return SessionIdentity.verify(DesktopProbe(), pid, startTime, comm, dbusAddress())
+    }
+
+    private fun dbusAddress() = "unix:path=${tmpDir.absolutePath}/dbus-session"
 
     // ── Command Execution ──
 
@@ -2307,6 +2275,7 @@ class LinuxRuntime(private val context: Context) {
         "bootstrapped" to isBootstrapped(),
         "desktop" to getInstalledDE().ifEmpty { null },
         "sessionRunning" to isRunning(),
+        "desktopState" to desktopState().toMap(),
         "graphics" to getGraphicsMode(),
         "prefix" to prefixDir.absolutePath,
         "home" to homeDir.absolutePath,
@@ -2398,7 +2367,12 @@ class LinuxRuntime(private val context: Context) {
         check("xclip (clipboard)", File(binDir, "xclip").canExecute())
         val shared = File("/storage/emulated/0")
         check("Android shared storage", shared.isDirectory && shared.canRead(), shared.absolutePath)
-        check("desktop session", true, if (isRunning()) "running" else "stopped")
+        val desktop = desktopState()
+        check("desktop session", true, when {
+            desktop.active -> "active (" + desktop.components.keys.joinToString() + ", DISPLAY=:0)"
+            isRunning() -> "starting or incomplete: " + desktop.toMap()
+            else -> "stopped"
+        })
         return checks
     }
 

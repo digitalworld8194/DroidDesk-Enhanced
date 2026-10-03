@@ -216,20 +216,32 @@ class MainActivity : FlutterActivity() {
 
                 // ── Runtime Status ──
                 "getRuntimeStatus" -> {
-                    val rooted = chrootRuntime.hasRoot()
-                    result.success(mapOf(
-                        "isBootstrapped" to if (rooted) chrootRuntime.isRootfsReady() else linuxRuntime.isBootstrapped(),
-                        "isRunning" to if (rooted) chrootRuntime.isRunning() else linuxRuntime.isRunning(),
-                        "hasRoot" to rooted,
-                        "distro" to if (rooted) "ubuntu-chroot" else "termux-native",
-                        "installedDE" to if (rooted) {
-                            if (chrootRuntime.isDesktopInstalled()) "xfce4" else ""
-                        } else {
-                            linuxRuntime.getInstalledDE()
-                        },
-                        "rootfsPath" to if (rooted) chrootRuntime.getRootfsPath() else "",
-                        "rootfsSizeMB" to if (rooted) chrootRuntime.getRootfsSizeMB() else 0L
-                    ))
+                    // /proc scan and the X11 socket check block: never on the main thread.
+                    thread(name = "runtime-status") {
+                      try {
+                        val rooted = chrootRuntime.hasRoot()
+                        val desktop = if (rooted) null else linuxRuntime.desktopState()
+                        val status = mapOf(
+                            "isBootstrapped" to if (rooted) chrootRuntime.isRootfsReady() else linuxRuntime.isBootstrapped(),
+                            // Native mode: only a desktop whose components really run
+                            // and whose DISPLAY answers counts as "Escritorio activo".
+                            "isRunning" to if (rooted) chrootRuntime.isRunning() else desktop!!.active,
+                            "desktop" to (desktop?.toMap() ?: emptyMap<String, Any>()),
+                            "hasRoot" to rooted,
+                            "distro" to if (rooted) "ubuntu-chroot" else "termux-native",
+                            "installedDE" to if (rooted) {
+                                if (chrootRuntime.isDesktopInstalled()) "xfce4" else ""
+                            } else {
+                                linuxRuntime.getInstalledDE()
+                            },
+                            "rootfsPath" to if (rooted) chrootRuntime.getRootfsPath() else "",
+                            "rootfsSizeMB" to if (rooted) chrootRuntime.getRootfsSizeMB() else 0L
+                        )
+                        runOnUiThread { result.success(status) }
+                      } catch (error: Exception) {
+                        runOnUiThread { result.error("runtime_status", error.message, null) }
+                      }
+                    }
                 }
 
                 // ── Device Info ──
@@ -628,9 +640,11 @@ class MainActivity : FlutterActivity() {
                                 }
                                 return@thread
                             }
+                            // Reads /proc: decided here on the worker thread, not on the UI thread.
+                            val sessionRunning = linuxRuntime.isRunning()
                             runOnUiThread {
                                 val intent = Intent(this@MainActivity, com.orailnoor.droiddesk.view.DesktopActivity::class.java).apply {
-                                    putExtra("startSession", !linuxRuntime.isRunning())
+                                    putExtra("startSession", !sessionRunning)
                                     putExtra("mode", "termux")
                                     putExtra("de", desktopEnv)
                                 }
@@ -701,6 +715,36 @@ class MainActivity : FlutterActivity() {
                 "interruptCommand" -> {
                     linuxRuntime.interruptCommand()
                     result.success(true)
+                }
+
+                // ── Optional Linux container (PRoot), separate from the native runtime ──
+                "startContainerShell" -> {
+                    val backend = linuxRuntime.proot
+                    thread(name = "proot-shell") {
+                        val exit = backend.runShell { chunk ->
+                            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
+                                    .invokeMethod("onContainerOutput", mapOf("text" to chunk))
+                            }
+                        }
+                        runOnUiThread { result.success(exit) }
+                    }
+                }
+
+                "containerInput" -> {
+                    val command = call.argument<String>("command") ?: ""
+                    thread(name = "proot-input") {
+                        val sent = linuxRuntime.proot.sendInput(command)
+                        runOnUiThread { result.success(sent) }
+                    }
+                }
+
+                "stopContainerShell" -> {
+                    // Walks /proc and waits for the container tree: off the main thread.
+                    thread(name = "proot-stop") {
+                        linuxRuntime.proot.stopShell()
+                        runOnUiThread { result.success(true) }
+                    }
                 }
 
                 // ── System ──
@@ -803,10 +847,12 @@ class MainActivity : FlutterActivity() {
                 python = java.io.File(filesDir, "usr/bin/python3"),
             )
             if (linuxRuntime.isRunning()) {
-                linuxRuntime.executeCommand(
+                // Isolated process: never typed into whatever the terminal runs.
+                linuxRuntime.runControlCommand(
                     AndroidAppBridge.xfceDockCommand(this, homeDir) +
                         " DISPLAY=:0 xfce4-panel -r >/dev/null 2>&1 || true",
-                )
+                    60_000,
+                ) { }
             }
         }
     }

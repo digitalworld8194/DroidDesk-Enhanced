@@ -172,6 +172,8 @@ abstract class AppStrings {
   // ── Terminal ──
   String get terminalWelcome;
   String get commandInterrupted;
+  String get containerClosed;
+  String containerExited(int? exitCode);
   String get interruptCommand;
   String get enterCommand;
   String get terminalModeCompat;

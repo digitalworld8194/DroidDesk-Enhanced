@@ -182,6 +182,11 @@ class AppStringsEs extends AppStrings {
   // ── Terminal ──
   @override String get terminalWelcome => 'Terminal Linux de DroidDesk\nEscribe los comandos abajo.\n';
   @override String get commandInterrupted => '\n^C (Comando interrumpido)\n';
+  @override String get containerClosed =>
+      'El shell de Debian (PRoot) no está abierto.\n';
+  @override String containerExited(int? exitCode) => exitCode == null
+      ? '\n[PRoot no pudo iniciarse; el entorno nativo no se ha tocado]\n'
+      : '\n[Shell de Debian (PRoot) cerrado, código $exitCode]\n';
   @override String get interruptCommand => 'Interrumpir comando (Ctrl+C)';
   @override String get enterCommand => 'Escribe un comando...';
   @override String get terminalModeCompat => 'compat';

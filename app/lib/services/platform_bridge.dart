@@ -16,6 +16,7 @@ class DroidDeskPlatform {
   static Function(double progress, String status)? onPackageOperationProgress;
   static Function(String text)? onPackageOperationLog;
   static Function(String text)? onTerminalOutput;
+  static Function(String text)? onContainerOutput;
 
   static Future<void> updateStatusBarTheme(bool isLightMode) async {
     try {
@@ -51,6 +52,10 @@ class DroidDeskPlatform {
         case 'onTerminalOutput':
           final args = call.arguments as Map;
           onTerminalOutput?.call(args['text'] as String);
+          break;
+        case 'onContainerOutput':
+          final args = call.arguments as Map;
+          onContainerOutput?.call(args['text'] as String);
           break;
         case 'onOptionalInstallProgress':
           final args = call.arguments as Map;
@@ -304,6 +309,25 @@ class DroidDeskPlatform {
 
   static Future<void> interruptCommand() async {
     await _channel.invokeMethod('interruptCommand');
+  }
+
+  // ── Optional Linux container (PRoot), separate from the native runtime ──
+
+  /// Opens the Debian shell; completes with its exit code when it closes
+  /// (null when it could not start).
+  static Future<int?> startContainerShell() async {
+    return await _channel.invokeMethod<int>('startContainerShell');
+  }
+
+  static Future<bool> containerInput(String command) async {
+    return await _channel.invokeMethod<bool>('containerInput', {
+          'command': command,
+        }) ??
+        false;
+  }
+
+  static Future<void> stopContainerShell() async {
+    await _channel.invokeMethod('stopContainerShell');
   }
 
   // ── Battery Optimization ──
