@@ -40,8 +40,26 @@ class ManifestExportTest {
         }
     }
 
-    @Test fun noReceiversOrProvidersWereAdded() {
-        assertTrue(components().none { it.tagName == "receiver" || it.tagName == "provider" })
+    @Test fun noProvidersWereAdded() {
+        assertTrue(components().none { it.tagName == "provider" })
+    }
+
+    @Test fun onlyThePrivateWirelessAdbBootReceiverExists() {
+        val receivers = components().filter { it.tagName == "receiver" }
+        assertEquals(listOf(".runtime.WirelessAdbBootReceiver"), receivers.map { it.name() })
+
+        val receiver = receivers.single()
+        assertEquals("false", receiver.getAttributeNS(androidNs, "exported"))
+        val actions = receiver.getElementsByTagName("action")
+        val names = (0 until actions.length).map { (actions.item(it) as Element).getAttributeNS(androidNs, "name") }
+        assertEquals(
+            setOf(
+                "android.intent.action.LOCKED_BOOT_COMPLETED",
+                "android.intent.action.BOOT_COMPLETED",
+                "android.intent.action.MY_PACKAGE_REPLACED",
+            ),
+            names.toSet(),
+        )
     }
 
     @Test fun mainActivityKeepsLauncherAndHomeFilters() {
