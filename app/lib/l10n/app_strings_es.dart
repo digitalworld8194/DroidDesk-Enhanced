@@ -141,6 +141,25 @@ class AppStringsEs extends AppStrings {
   @override String get tapLaunchDesktop => 'Toca «Iniciar escritorio» para empezar';
   @override String get termuxNative => 'Termux nativo';
 
+  // ── Local AI ──
+  @override String get localAi => 'IA local';
+  @override String get localAiActive => 'IA activa';
+  @override String get localAiStopped => 'IA detenida';
+  @override String get localAiStarting => 'IA iniciando...';
+  @override String get localAiApiReady => 'API local lista';
+  @override String get localAiApiUnavailable => 'API local no disponible';
+  @override String get localAiControllerMissing =>
+      'El controlador de IA aún no está instalado';
+  @override String get startLocalAi => 'Iniciar IA';
+  @override String get stopLocalAi => 'Detener IA';
+  @override String get restartLocalAi => 'Reiniciar IA';
+  @override String get testLocalAi => 'Probar IA';
+  @override String get openLocalAiChat => 'Abrir chat';
+  @override String get localAiTestOk => 'La IA respondió correctamente';
+  @override String localAiModel(String model) => 'Modelo: $model';
+  @override String localAiActionFailed(String error) =>
+      'La acción de IA falló: $error';
+
   // ── Settings sheet ──
   @override String get settings => 'Ajustes';
   @override String get appTheme => 'Tema de la app';

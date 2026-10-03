@@ -582,6 +582,47 @@ class MainActivity : FlutterActivity() {
                     result.success(true)
                 }
 
+                  // ── Local AI ──
+                  "getLocalAiStatus" -> {
+                      thread(name = "local-ai-status") {
+                          val value = runLocalAiCommand("status")
+                          runOnUiThread { result.success(value) }
+                      }
+                  }
+
+                  "controlLocalAi" -> {
+                      val action = call.argument<String>("action") ?: ""
+                      val allowed = setOf("start", "stop", "restart", "test")
+
+                      if (action !in allowed) {
+                          result.error(
+                              "local_ai_action",
+                              "Unsupported local AI action",
+                              null,
+                          )
+                      } else {
+                          thread(name = "local-ai-$action") {
+                              val value = runLocalAiCommand(action)
+                              runOnUiThread { result.success(value) }
+                          }
+                      }
+                  }
+
+                  "openLocalAiChat" -> {
+                      runCatching {
+                          startActivity(
+                              Intent(
+                                  Intent.ACTION_VIEW,
+                                  android.net.Uri.parse("http://127.0.0.1:8080"),
+                              ),
+                          )
+                      }.onSuccess {
+                          result.success(true)
+                      }.onFailure { error ->
+                          result.error("local_ai_chat", error.message, null)
+                      }
+                  }
+
                 // ── Start Linux session ──
                 "startLinux" -> {
                     runCatching {
@@ -819,6 +860,84 @@ class MainActivity : FlutterActivity() {
             @Suppress("DEPRECATION")
             window.decorView.systemUiVisibility = flags
         }
+    }
+
+    private fun runLocalAiCommand(action: String): Map<String, Any> {
+        val allowed = setOf("start", "stop", "restart", "status", "test")
+
+        if (action !in allowed) {
+            return mapOf(
+                "ok" to false,
+                "installed" to false,
+                "running" to false,
+                "healthy" to false,
+                "output" to "Unsupported local AI action",
+            )
+        }
+
+        val controller = java.io.File(filesDir, "usr/bin/droiddesk-ai")
+        val model = "Gemma 3 4B Q4_K_M"
+        val url = "http://127.0.0.1:8080"
+
+        if (!controller.isFile) {
+            return mapOf(
+                "ok" to false,
+                "installed" to false,
+                "running" to false,
+                "healthy" to false,
+                "model" to model,
+                "url" to url,
+                "output" to "droiddesk-ai is not installed",
+            )
+        }
+
+        val timeout = when (action) {
+            "start", "restart" -> 60_000L
+            "stop", "test" -> 30_000L
+            else -> 15_000L
+        }
+
+        val actionOutcome = linuxRuntime.runControlCommand(
+            "\"${controller.absolutePath}\" $action",
+            timeout,
+        )
+
+        val actionOutput = actionOutcome.tail.trim()
+
+        val statusOutcome = if (action == "status") {
+            actionOutcome
+        } else {
+            linuxRuntime.runControlCommand(
+                "\"${controller.absolutePath}\" status",
+                15_000L,
+            )
+        }
+
+        val statusOutput = statusOutcome.tail.trim()
+
+        val running = statusOutput.contains("IA ACTIVA")
+        val healthy = statusOutput.contains("API saludable")
+
+        val ok = when (action) {
+            "status" -> actionOutcome.exitCode == 0
+            "start", "restart" -> actionOutcome.exitCode == 0 && healthy
+            "stop" -> !running
+            "test" -> actionOutcome.exitCode == 0 &&
+                actionOutput.contains("DROIDDESK IA OK")
+            else -> false
+        }
+
+        return mapOf(
+            "ok" to ok,
+            "installed" to true,
+            "running" to running,
+            "healthy" to healthy,
+            "model" to model,
+            "url" to url,
+            "exitCode" to actionOutcome.exitCode,
+            "output" to actionOutput,
+            "statusOutput" to statusOutput,
+        )
     }
 
     private fun syncAndroidDesktopIntegration() {

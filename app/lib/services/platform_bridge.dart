@@ -93,6 +93,27 @@ class DroidDeskPlatform {
     return Map<String, dynamic>.from(result);
   }
 
+  // ── Local AI ──
+
+  static Future<Map<String, dynamic>> getLocalAiStatus() async {
+    final result = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+      'getLocalAiStatus',
+    );
+    return Map<String, dynamic>.from(result ?? const {});
+  }
+
+  static Future<Map<String, dynamic>> controlLocalAi(String action) async {
+    final result = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+      'controlLocalAi',
+      {'action': action},
+    );
+    return Map<String, dynamic>.from(result ?? const {});
+  }
+
+  static Future<void> openLocalAiChat() async {
+    await _channel.invokeMethod('openLocalAiChat');
+  }
+
   // ── Bootstrap ──
 
   static Future<void> setupBootstrap() async {

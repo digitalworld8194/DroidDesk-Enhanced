@@ -136,6 +136,23 @@ abstract class AppStrings {
   String get tapLaunchDesktop;
   String get termuxNative;
 
+    // ── Local AI ──
+    String get localAi;
+    String get localAiActive;
+    String get localAiStopped;
+    String get localAiStarting;
+    String get localAiApiReady;
+    String get localAiApiUnavailable;
+    String get localAiControllerMissing;
+    String get startLocalAi;
+    String get stopLocalAi;
+    String get restartLocalAi;
+    String get testLocalAi;
+    String get openLocalAiChat;
+    String get localAiTestOk;
+    String localAiModel(String model);
+    String localAiActionFailed(String error);
+
   // ── Settings sheet ──
   String get settings;
   String get appTheme;

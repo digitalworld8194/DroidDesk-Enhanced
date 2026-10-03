@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -239,6 +241,14 @@ class HomeScreen extends StatelessWidget {
                   ),
                 ),
               ),
+
+                // ── Local AI ──
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 14, 24, 0),
+                    child: const _LocalAiCard(),
+                  ),
+                ),
 
               // ── System Info ──
               SliverToBoxAdapter(
@@ -702,6 +712,243 @@ class HomeScreen extends StatelessWidget {
 }
 
 /// Simple terminal bottom sheet with command execution.
+class _LocalAiCard extends StatefulWidget {
+  const _LocalAiCard();
+
+  @override
+  State<_LocalAiCard> createState() => _LocalAiCardState();
+}
+
+class _LocalAiCardState extends State<_LocalAiCard> {
+  Timer? _timer;
+
+  bool _loading = true;
+  bool _busy = false;
+  bool _installed = false;
+  bool _running = false;
+  bool _healthy = false;
+
+  String _model = 'Gemma 3 4B Q4_K_M';
+
+  @override
+  void initState() {
+    super.initState();
+
+    _refresh();
+
+    _timer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) => _refresh(silent: true),
+    );
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refresh({bool silent = false}) async {
+    try {
+      final value = await DroidDeskPlatform.getLocalAiStatus();
+
+      if (!mounted) return;
+
+      setState(() {
+        _installed = value['installed'] == true;
+        _running = value['running'] == true;
+        _healthy = value['healthy'] == true;
+        _model = value['model']?.toString() ?? _model;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+
+      setState(() {
+        _healthy = false;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _action(String action) async {
+    if (_busy) return;
+
+    setState(() => _busy = true);
+
+    try {
+      final result = await DroidDeskPlatform.controlLocalAi(action);
+
+      await _refresh();
+
+      if (!mounted) return;
+
+      final ok = result['ok'] == true;
+      final output = result['output']?.toString() ?? '';
+
+      final message = action == 'test' && ok
+          ? l10n.localAiTestOk
+          : ok
+              ? (_healthy ? l10n.localAiApiReady : l10n.localAiStopped)
+              : l10n.localAiActionFailed(
+                  output.isEmpty ? 'sin detalles' : output,
+                );
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: ok ? DroidTheme.accent : DroidTheme.error,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(l10n.localAiActionFailed(error.toString())),
+          backgroundColor: DroidTheme.error,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _healthy
+        ? DroidTheme.accent
+        : _running
+            ? DroidTheme.secondary
+            : DroidTheme.textMuted;
+
+    final status = _loading
+        ? l10n.localAiStarting
+        : !_installed
+            ? l10n.localAiControllerMissing
+            : _healthy
+                ? l10n.localAiApiReady
+                : _running
+                    ? l10n.localAiStarting
+                    : l10n.localAiStopped;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: DroidTheme.cardBg,
+        borderRadius: BorderRadius.circular(DroidTheme.radiusMd),
+        border: Border.all(
+          color: _healthy
+              ? DroidTheme.accent.withValues(alpha: 0.35)
+              : DroidTheme.surfaceBorder,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.smart_toy_rounded, color: color),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  l10n.localAi,
+                  style: DroidTheme.headingSm,
+                ),
+              ),
+              if (_loading || _busy)
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Icon(
+                  _healthy
+                      ? Icons.check_circle_rounded
+                      : Icons.circle_outlined,
+                  color: color,
+                  size: 18,
+                ),
+            ],
+          ),
+
+          const SizedBox(height: 8),
+
+          Text(
+            status,
+            style: DroidTheme.bodySm.copyWith(color: color),
+          ),
+
+          const SizedBox(height: 4),
+
+          Text(
+            l10n.localAiModel(_model),
+            style: DroidTheme.bodySm.copyWith(
+              color: DroidTheme.textMuted,
+            ),
+          ),
+
+          const SizedBox(height: 14),
+
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (!_running)
+                FilledButton.icon(
+                  onPressed: !_installed || _busy
+                      ? null
+                      : () => _action('start'),
+                  icon: const Icon(Icons.play_arrow_rounded),
+                  label: Text(l10n.startLocalAi),
+                ),
+
+              if (_running)
+                OutlinedButton.icon(
+                  onPressed: _busy
+                      ? null
+                      : () => _action('restart'),
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: Text(l10n.restartLocalAi),
+                ),
+
+              if (_running)
+                OutlinedButton.icon(
+                  onPressed: _busy
+                      ? null
+                      : () => _action('stop'),
+                  icon: const Icon(Icons.stop_rounded),
+                  label: Text(l10n.stopLocalAi),
+                ),
+
+              OutlinedButton.icon(
+                onPressed: !_healthy || _busy
+                    ? null
+                    : () => _action('test'),
+                icon: const Icon(Icons.science_rounded),
+                label: Text(l10n.testLocalAi),
+              ),
+
+              FilledButton.tonalIcon(
+                onPressed: !_healthy || _busy
+                    ? null
+                    : () => DroidDeskPlatform.openLocalAiChat(),
+                icon: const Icon(Icons.chat_rounded),
+                label: Text(l10n.openLocalAiChat),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
 class _TerminalSheet extends StatefulWidget {
   final AppState state;
   const _TerminalSheet({required this.state});
