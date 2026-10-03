@@ -78,6 +78,12 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
+        <!-- Content-trigger job: restores Wireless debugging while DroidDesk is cached or killed. -->
+        <service
+            android:name=".runtime.WirelessAdbJobService"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
         <!-- Restores Wireless debugging after reboot/update without starting an FGS. -->
         <receiver
             android:name=".runtime.WirelessAdbBootReceiver"

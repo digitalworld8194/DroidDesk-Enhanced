@@ -1,6 +1,9 @@
 package com.orailnoor.droiddesk.runtime
 
 import android.Manifest
+import android.app.job.JobInfo
+import android.app.job.JobScheduler
+import android.content.ComponentName
 import android.content.Context
 import android.content.pm.PackageManager
 import android.database.ContentObserver
@@ -16,12 +19,15 @@ import android.util.Log
  * WRITE_SECURE_SETTINGS is intentionally not silently obtainable by the app.
  * It is granted once through adb after installation.
  *
- * Uses Settings observers instead of polling every few seconds.
+ * Uses Settings observers instead of polling every few seconds. The observer
+ * only reacts while the process is alive and not frozen, so a content-trigger
+ * job (see [WirelessAdbJobService]) covers the cached/killed case.
  */
 object WirelessAdbKeeper {
     private const val TAG = "WirelessAdbKeeper"
     private const val ADB_WIFI_ENABLED = "adb_wifi_enabled"
     private const val ADB_ALLOWED_CONNECTION_TIME = "adb_allowed_connection_time"
+    private const val CONTENT_JOB_ID = 0x0ADB
 
     private val lock = Any()
     private var observer: ContentObserver? = null
@@ -30,6 +36,7 @@ object WirelessAdbKeeper {
         val app = context.applicationContext
 
         ensureEnabled(app)
+        scheduleContentJob(app)
 
         synchronized(lock) {
             if (observer != null) return
@@ -60,6 +67,34 @@ object WirelessAdbKeeper {
 
             observer = created
             Log.i(TAG, "Wireless ADB observer registered")
+        }
+    }
+
+    fun scheduleContentJob(context: Context) {
+        try {
+            val job = JobInfo.Builder(
+                CONTENT_JOB_ID,
+                ComponentName(context, WirelessAdbJobService::class.java),
+            )
+                .addTriggerContentUri(
+                    JobInfo.TriggerContentUri(Settings.Global.getUriFor(ADB_WIFI_ENABLED), 0),
+                )
+                .addTriggerContentUri(
+                    JobInfo.TriggerContentUri(
+                        Settings.Global.getUriFor(ADB_ALLOWED_CONNECTION_TIME),
+                        0,
+                    ),
+                )
+                .setTriggerContentUpdateDelay(0)
+                .setTriggerContentMaxDelay(1000)
+                .build()
+
+            val scheduler = context.getSystemService(JobScheduler::class.java)
+            if (scheduler.schedule(job) != JobScheduler.RESULT_SUCCESS) {
+                Log.w(TAG, "Wireless ADB content job was not scheduled")
+            }
+        } catch (error: Throwable) {
+            Log.e(TAG, "Unable to schedule Wireless ADB content job", error)
         }
     }
 

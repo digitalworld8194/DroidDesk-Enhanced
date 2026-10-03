@@ -40,6 +40,12 @@ class ManifestExportTest {
         }
     }
 
+    @Test fun wirelessAdbJobServiceIsBoundOnlyByTheJobScheduler() {
+        val job = components().single { it.name() == ".runtime.WirelessAdbJobService" }
+        assertEquals("service", job.tagName)
+        assertEquals("android.permission.BIND_JOB_SERVICE", job.getAttributeNS(androidNs, "permission"))
+    }
+
     @Test fun noProvidersWereAdded() {
         assertTrue(components().none { it.tagName == "provider" })
     }
