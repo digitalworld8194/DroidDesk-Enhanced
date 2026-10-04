@@ -110,6 +110,10 @@ class DesktopActivity : Activity() {
     }
 
     companion object {
+        private const val EDGE_CONTROL_WIDTH_DP = 18f
+        private const val EDGE_CONTROL_TRIGGER_DP = 52f
+        private const val EDGE_CONTROL_VERTICAL_TOLERANCE_DP = 110f
+
         private const val TAG = "DesktopActivity"
 
         @Volatile private var active: java.lang.ref.WeakReference<DesktopActivity>? = null
@@ -165,6 +169,7 @@ placeholder = FrameLayout(this)
 
     override fun onResume() {
         super.onResume()
+        window.decorView.postDelayed({ hideControlOverlay() }, 700L)
         enableImmersiveMode()
     }
 
@@ -574,15 +579,41 @@ placeholder = FrameLayout(this)
         }
     }
 
+    // DROIDDESK_HIDDEN_CONTROL_PANEL
+    //
+    // Los controles de escritorio no permanecen flotando sobre X11.
+    // Se muestran únicamente bajo demanda mediante el gesto reservado
+    // desde el borde derecho.
+    private var edgeControlsTracking = false
+    private var edgeControlsDownX = 0f
+    private var edgeControlsDownY = 0f
+    private var edgeControlsShown = false
+
+    private fun droidDeskDp(value: Float): Float =
+        value * resources.displayMetrics.density
+
+    private fun hideControlOverlay() {
+        sensitivityPanel?.visibility = View.GONE
+        controlOverlay?.visibility = View.GONE
+        collapsedControl?.visibility = View.GONE
+    }
+
+    private fun showControlOverlay() {
+        sensitivityPanel?.visibility = View.GONE
+        collapsedControl?.visibility = View.GONE
+
+        controlOverlay?.apply {
+            visibility = View.VISIBLE
+            bringToFront()
+        }
+    }
+
     private fun setControlsCollapsed(collapsed: Boolean) {
-        if (collapsed) sensitivityPanel?.visibility = View.GONE
-        val from = if (collapsed) controlOverlay else collapsedControl
-        val to = if (collapsed) collapsedControl else controlOverlay
-        to?.x = from?.x ?: 0f
-        to?.y = from?.y ?: 0f
-        from?.visibility = View.INVISIBLE
-        to?.visibility = View.VISIBLE
-        to?.bringToFront()
+        if (collapsed) {
+            hideControlOverlay()
+        } else {
+            showControlOverlay()
+        }
     }
 
     private fun maybeShowKeyboardForTextCursor() {
@@ -614,6 +645,83 @@ placeholder = FrameLayout(this)
      * Print Screen pertenece a DroidDesk.
      * Las demás teclas físicas se ofrecen primero al motor X11.
      */
+    // DROIDDESK_EDGE_CONTROL_GESTURE
+    //
+    // Una franja muy pequeña del borde derecho queda reservada.
+    // Deslizar desde ese borde hacia la izquierda muestra el panel.
+    //
+    // No afecta al mouse físico y no deja ningún botón flotante.
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        val finger =
+            event.pointerCount > 0 &&
+                event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER
+
+        val screenWidth =
+            window.decorView.width
+                .takeIf { it > 0 }
+                ?: resources.displayMetrics.widthPixels
+
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                edgeControlsTracking =
+                    finger &&
+                    event.x >=
+                        screenWidth -
+                        droidDeskDp(EDGE_CONTROL_WIDTH_DP)
+
+                if (edgeControlsTracking) {
+                    edgeControlsDownX = event.x
+                    edgeControlsDownY = event.y
+                    edgeControlsShown = false
+
+                    // La franja pertenece a DroidDesk, no a X11.
+                    return true
+                }
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                if (edgeControlsTracking) {
+                    val horizontal =
+                        edgeControlsDownX - event.x
+
+                    val vertical =
+                        kotlin.math.abs(
+                            event.y - edgeControlsDownY,
+                        )
+
+                    if (
+                        horizontal >=
+                            droidDeskDp(
+                                EDGE_CONTROL_TRIGGER_DP,
+                            ) &&
+                        vertical <=
+                            droidDeskDp(
+                                EDGE_CONTROL_VERTICAL_TOLERANCE_DP,
+                            )
+                    ) {
+                        if (!edgeControlsShown) {
+                            edgeControlsShown = true
+                            showControlOverlay()
+                        }
+                    }
+
+                    return true
+                }
+            }
+
+            MotionEvent.ACTION_UP,
+            MotionEvent.ACTION_CANCEL -> {
+                if (edgeControlsTracking) {
+                    edgeControlsTracking = false
+                    edgeControlsShown = false
+                    return true
+                }
+            }
+        }
+
+        return super.dispatchTouchEvent(event)
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.keyCode == KeyEvent.KEYCODE_SYSRQ) {
             if (event.action == KeyEvent.ACTION_UP) {

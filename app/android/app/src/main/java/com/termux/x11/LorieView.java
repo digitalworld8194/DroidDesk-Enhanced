@@ -933,6 +933,17 @@ public class LorieView extends SurfaceView implements InputStub {
         TouchInputHandler.refreshInputDevices();
     }
 
+    /**
+     * DroidDesk presents the X11 surface as a real Android text editor.
+     *
+     * This lets Samsung Keyboard attach directly to LorieView through the
+     * existing InputConnection without requiring any external Android app.
+     */
+    @Override
+    public boolean onCheckIsTextEditor() {
+        return true;
+    }
+
     @Override
     public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
         if (MainActivity.getPrefs().enforceCharBasedInput.get())

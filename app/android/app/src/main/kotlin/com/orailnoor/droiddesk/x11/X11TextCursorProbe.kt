@@ -1,43 +1,40 @@
 package com.orailnoor.droiddesk.x11
 
 import android.content.Context
+import android.net.LocalSocket
+import android.net.LocalSocketAddress
 import android.util.Log
 import java.io.File
+import java.io.InputStream
 import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Performs a short one-shot XFixes query inside DroidDesk's private
- * Termux-compatible runtime.
+ * Detector X11 interno de DroidDesk.
  *
- * The bundled/core X11 text cursor has a stable pixel signature in the
- * DroidDesk desktop environment. The probe only runs after an actual tap or
- * primary mouse click, so merely hovering over text never opens Android's IME.
+ * Consulta directamente XFixes por el socket privado X0.
+ * No ejecuta Python, ProcessBuilder, Termux API ni otra aplicación.
+ * Solo se ejecuta una vez después de un tap/click relevante.
  */
 class X11TextCursorProbe(context: Context) {
-    private val filesDir = context.applicationContext.filesDir
-    private val prefix = File(filesDir, "usr")
-    private val home = File(filesDir, "home")
-    private val tmp = File(filesDir, "tmp")
-    private val python = File(prefix, "bin/python3")
-    private val socketHook = File(prefix, "lib/libsocket_hook.so")
-    private val probeFile = File(tmp, ".droiddesk_text_cursor_probe.py")
+
+    private val socketFile =
+        File(context.applicationContext.filesDir, "tmp/.X11-unix/X0")
 
     private val executor = Executors.newSingleThreadExecutor()
-    private val inFlight = AtomicBoolean(false)
+    private val busy = AtomicBoolean(false)
 
     fun probe(callback: (Boolean) -> Unit) {
-        if (!inFlight.compareAndSet(false, true)) return
+        if (!busy.compareAndSet(false, true)) return
 
         executor.execute {
             val result = try {
-                queryTextCursor()
-            } catch (error: Throwable) {
-                Log.w(TAG, "X11 text-cursor probe failed", error)
+                query()
+            } catch (t: Throwable) {
+                Log.w(TAG, "X11 internal cursor probe failed", t)
                 false
             } finally {
-                inFlight.set(false)
+                busy.set(false)
             }
 
             callback(result)
@@ -48,153 +45,248 @@ class X11TextCursorProbe(context: Context) {
         executor.shutdownNow()
     }
 
-    private fun queryTextCursor(): Boolean {
-        if (!python.canExecute() || !socketHook.isFile) {
-            Log.w(TAG, "Cursor probe unavailable: python=${python.canExecute()} hook=${socketHook.isFile}")
-            return false
+    private fun query(): Boolean {
+        if (!socketFile.exists()) return false
+
+        val socket = LocalSocket()
+
+        try {
+            socket.soTimeout = 750
+
+            socket.connect(
+                LocalSocketAddress(
+                    socketFile.absolutePath,
+                    LocalSocketAddress.Namespace.FILESYSTEM,
+                )
+            )
+
+            val input = socket.inputStream
+            val output = socket.outputStream
+
+            // X11 connection setup: LE, protocol 11.0, no auth.
+            output.write(
+                byteArrayOf(
+                    'l'.code.toByte(), 0,
+                    11, 0,
+                    0, 0,
+                    0, 0,
+                    0, 0,
+                    0, 0,
+                )
+            )
+            output.flush()
+
+            val setup = readFully(input, 8)
+
+            if (u8(setup, 0) != 1)
+                return false
+
+            val setupExtra = u16(setup, 6) * 4
+            if (setupExtra > 0)
+                readFully(input, setupExtra)
+
+            val xfixesOpcode =
+                queryExtension(input, output)
+                    ?: return false
+
+            // XFixesQueryVersion 5.0
+            val versionReq = ByteArray(12)
+            versionReq[0] = xfixesOpcode.toByte()
+            versionReq[1] = 0
+            put16(versionReq, 2, 3)
+            put32(versionReq, 4, 5)
+            put32(versionReq, 8, 0)
+
+            output.write(versionReq)
+            output.flush()
+
+            val versionReply = readFully(input, 32)
+            if (u8(versionReply, 0) != 1)
+                return false
+
+            // XFixesGetCursorImage = minor opcode 4.
+            output.write(
+                byteArrayOf(
+                    xfixesOpcode.toByte(),
+                    4,
+                    1,
+                    0,
+                )
+            )
+            output.flush()
+
+            val reply = readFully(input, 32)
+
+            if (u8(reply, 0) != 1)
+                return false
+
+            val units = u32(reply, 4)
+
+            if (units > MAX_REPLY_UNITS)
+                return false
+
+            val width = u16(reply, 12)
+            val height = u16(reply, 14)
+
+            val count = width.toLong() * height.toLong()
+
+            if (count <= 0 || count > MAX_PIXELS)
+                return false
+
+            val payloadBytes = units * 4L
+
+            if (payloadBytes > MAX_REPLY_BYTES)
+                return false
+
+            val payload =
+                readFully(input, payloadBytes.toInt())
+
+            if (payload.size < count * 4L)
+                return false
+
+            var hash = FNV_OFFSET
+
+            repeat(count.toInt()) { index ->
+                hash = hash xor u32(payload, index * 4)
+                hash *= FNV_PRIME
+            }
+
+            val signature =
+                java.lang.Long
+                    .toUnsignedString(hash, 16)
+                    .padStart(16, '0')
+
+            val text =
+                width == 9 &&
+                height == 16 &&
+                signature == TEXT_SIGNATURE
+
+            Log.d(
+                TAG,
+                "cursor=${width}x$height sig=$signature text=$text"
+            )
+
+            return text
+
+        } finally {
+            try {
+                socket.close()
+            } catch (_: Throwable) {
+            }
+        }
+    }
+
+    private fun queryExtension(
+        input: InputStream,
+        output: java.io.OutputStream,
+    ): Int? {
+        val name = "XFIXES".toByteArray(Charsets.US_ASCII)
+        val pad = (4 - (name.size and 3)) and 3
+        val length = (8 + name.size + pad) / 4
+
+        val req = ByteArray(8)
+
+        req[0] = 98
+        put16(req, 2, length)
+        put16(req, 4, name.size)
+
+        output.write(req)
+        output.write(name)
+
+        repeat(pad) {
+            output.write(0)
         }
 
-        tmp.mkdirs()
+        output.flush()
 
-        if (!probeFile.isFile || probeFile.readText() != SCRIPT) {
-            probeFile.writeText(SCRIPT)
+        val reply = readFully(input, 32)
+
+        if (u8(reply, 0) != 1)
+            return null
+
+        if (u8(reply, 8) == 0)
+            return null
+
+        return u8(reply, 9)
+    }
+
+    private fun readFully(
+        input: InputStream,
+        size: Int,
+    ): ByteArray {
+        require(size in 0..MAX_REPLY_BYTES.toInt())
+
+        val result = ByteArray(size)
+        var offset = 0
+
+        while (offset < size) {
+            val n = input.read(
+                result,
+                offset,
+                size - offset,
+            )
+
+            if (n < 0)
+                error("Unexpected EOF from X11")
+
+            offset += n
         }
 
-        val processBuilder = ProcessBuilder(
-            python.absolutePath,
-            probeFile.absolutePath,
-        )
+        return result
+    }
 
-        processBuilder.redirectErrorStream(true)
+    private fun u8(b: ByteArray, o: Int): Int =
+        b[o].toInt() and 0xff
 
-        processBuilder.environment().apply {
-            put("PREFIX", prefix.absolutePath)
-            put("TERMUX__PREFIX", prefix.absolutePath)
-            put("HOME", home.absolutePath)
-            put("TMPDIR", tmp.absolutePath)
-            put("DISPLAY", ":0")
-            put("LD_LIBRARY_PATH", File(prefix, "lib").absolutePath)
-            put("LD_PRELOAD", socketHook.absolutePath)
-            put("PATH", "${File(prefix, "bin").absolutePath}:${File(prefix, "lib/xfce4/panel").absolutePath}:/system/bin")
-        }
+    private fun u16(b: ByteArray, o: Int): Int =
+        u8(b, o) or
+            (u8(b, o + 1) shl 8)
 
-        val process = processBuilder.start()
+    private fun u32(b: ByteArray, o: Int): Long =
+        u8(b, o).toLong() or
+            (u8(b, o + 1).toLong() shl 8) or
+            (u8(b, o + 2).toLong() shl 16) or
+            (u8(b, o + 3).toLong() shl 24)
 
-        if (!process.waitFor(PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-            process.destroyForcibly()
-            Log.w(TAG, "X11 text-cursor probe timed out")
-            return false
-        }
+    private fun put16(
+        b: ByteArray,
+        o: Int,
+        value: Int,
+    ) {
+        b[o] = value.toByte()
+        b[o + 1] = (value ushr 8).toByte()
+    }
 
-        val output = process.inputStream
-            .bufferedReader()
-            .use { it.readText() }
-
-        val isText = process.exitValue() == 0 &&
-            output.lineSequence().any { it.trim() == "TEXT" }
-
-        Log.d(TAG, "X11 cursor probe text=$isText")
-        return isText
+    private fun put32(
+        b: ByteArray,
+        o: Int,
+        value: Int,
+    ) {
+        b[o] = value.toByte()
+        b[o + 1] = (value ushr 8).toByte()
+        b[o + 2] = (value ushr 16).toByte()
+        b[o + 3] = (value ushr 24).toByte()
     }
 
     companion object {
         private const val TAG = "X11TextCursorProbe"
-        private const val PROBE_TIMEOUT_MS = 1000L
 
-        /*
-         * Proven on the DroidDesk bundled/core cursor:
-         *
-         * text:
-         *   9x16  8dbe01a416814055
-         *
-         * default pointer:
-         *   10x16 bce895fd04b4a70b
-         *
-         * This same text signature was observed in both Xfce4 Terminal
-         * and Firefox editable areas.
-         */
-        private val SCRIPT = """
-import ctypes
-import os
-import sys
+        private const val TEXT_SIGNATURE =
+            "8dbe01a416814055"
 
-TEXT_SIGNATURES = {
-    "8dbe01a416814055",
-}
+        private const val FNV_OFFSET =
+            1469598103934665603L
 
-class CursorImage(ctypes.Structure):
-    _fields_ = [
-        ("x", ctypes.c_short),
-        ("y", ctypes.c_short),
-        ("width", ctypes.c_ushort),
-        ("height", ctypes.c_ushort),
-        ("xhot", ctypes.c_ushort),
-        ("yhot", ctypes.c_ushort),
-        ("cursor_serial", ctypes.c_ulong),
-        ("pixels", ctypes.POINTER(ctypes.c_ulong)),
-    ]
+        private const val FNV_PRIME =
+            1099511628211L
 
-def signature(cursor):
-    count = int(cursor.width) * int(cursor.height)
+        private const val MAX_PIXELS =
+            1_048_576L
 
-    if count <= 0 or not cursor.pixels:
-        return "none"
+        private const val MAX_REPLY_UNITS =
+            1_048_576L
 
-    value = 1469598103934665603
-
-    for index in range(count):
-        value ^= int(cursor.pixels[index]) & 0xffffffffffffffff
-        value = (value * 1099511628211) & 0xffffffffffffffff
-
-    return format(value, "016x")
-
-prefix = os.environ.get("PREFIX", "")
-
-try:
-    x11 = ctypes.CDLL(prefix + "/lib/libX11.so")
-    xfixes = ctypes.CDLL(prefix + "/lib/libXfixes.so")
-
-    x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
-    x11.XOpenDisplay.restype = ctypes.c_void_p
-
-    x11.XFree.argtypes = [ctypes.c_void_p]
-    x11.XFree.restype = ctypes.c_int
-
-    x11.XCloseDisplay.argtypes = [ctypes.c_void_p]
-    x11.XCloseDisplay.restype = ctypes.c_int
-
-    xfixes.XFixesGetCursorImage.argtypes = [ctypes.c_void_p]
-    xfixes.XFixesGetCursorImage.restype = ctypes.POINTER(CursorImage)
-
-    display = x11.XOpenDisplay(b":0")
-
-    if not display:
-        print("OTHER")
-        sys.exit(0)
-
-    pointer = xfixes.XFixesGetCursorImage(display)
-
-    if not pointer:
-        x11.XCloseDisplay(display)
-        print("OTHER")
-        sys.exit(0)
-
-    cursor = pointer.contents
-    sig = signature(cursor)
-
-    is_text = (
-        int(cursor.width) == 9
-        and int(cursor.height) == 16
-        and sig in TEXT_SIGNATURES
-    )
-
-    x11.XFree(ctypes.cast(pointer, ctypes.c_void_p))
-    x11.XCloseDisplay(display)
-
-    print("TEXT" if is_text else "OTHER")
-
-except Exception:
-    print("OTHER")
-""".trimIndent()
+        private const val MAX_REPLY_BYTES =
+            4_194_304L
     }
 }
