@@ -50,6 +50,12 @@ class MainActivity : FlutterActivity() {
         linuxRuntime = LinuxRuntime(this)
         chrootRuntime = ChrootRuntime(this)
         desktopIntegration = DesktopIntegration(this)
+        // start-debian/debian-apps embed the APK's nativeLibraryDir (PROOT_LOADER),
+        // which moves on every app update; rewrite them so they never go stale.
+        thread(name = "proot-launchers") {
+            runCatching { linuxRuntime.proot.takeIf { it.isInstalled() }?.writeLaunchers() }
+                .onFailure { Log.w(TAG, "Could not refresh the PRoot launchers", it) }
+        }
         // MainActivity is the HOME screen, so this keeps droiddeskctl reachable
         // even when no Linux desktop is running.
         ControlBridge.acquire(this, CONTROL_OWNER)
