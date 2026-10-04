@@ -2,17 +2,22 @@ package com.orailnoor.droiddesk.view
 
 import com.orailnoor.droiddesk.R
 import android.app.Activity
+import android.content.ContentValues
 import android.os.Build
+import android.os.Environment
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.graphics.Color
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.drawable.GradientDrawable
 import android.view.Window
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.view.KeyEvent
+import android.view.PixelCopy
 import android.view.SurfaceHolder
 import android.view.ViewGroup
 import android.view.View
@@ -36,10 +41,16 @@ import com.orailnoor.droiddesk.runtime.ChrootRuntime
 import com.orailnoor.droiddesk.runtime.ClipboardSync
 import com.orailnoor.droiddesk.x11.X11ServiceClient
 import com.orailnoor.droiddesk.x11.X11InputController
+import com.orailnoor.droiddesk.x11.X11TextCursorProbe
 import com.termux.x11.input.TrackpadSensitivity
+import android.provider.MediaStore
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class DesktopActivity : Activity() {
     private var lorieView: LorieView? = null
+    private val textCursorProbe by lazy { X11TextCursorProbe(this) }
     private var connectionRequested = false
     private var isSetupDone = false
     private var shouldStartSession = false
@@ -123,7 +134,14 @@ class DesktopActivity : Activity() {
         requestWindowFeature(Window.FEATURE_NO_TITLE)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-        placeholder = FrameLayout(this)
+
+        // Perfil laptop: el teclado Android se superpone al escritorio
+        // sin cambiar permanentemente la geometría de XFCE.
+        window.setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING
+        )
+
+placeholder = FrameLayout(this)
         placeholder.setBackgroundColor(Color.BLACK)
         setContentView(placeholder)
         showLoadingOverlay()
@@ -268,7 +286,9 @@ class DesktopActivity : Activity() {
 
     private fun attachDesktopInput() {
         if (inputController == null) {
-            inputController = X11InputController(lorieView!!)
+            inputController = X11InputController(lorieView!!) {
+                maybeShowKeyboardForTextCursor()
+            }
         }
         addDesktopControls()
         lorieView?.requestFocus()
@@ -302,11 +322,17 @@ class DesktopActivity : Activity() {
         val keyboardButton = controlButton(getString(R.string.desktop_control_keyboard)).apply {
             setOnClickListener { showKeyboard() }
         }
+        // DroidDesk inicia como teléfono/tablet.
+        // El usuario puede activar Puntero desde el menú cuando lo necesite.
         inputModeButton = controlButton(inputModeLabel()).apply {
+            contentDescription = inputModeLabel()
+
             setOnClickListener {
                 inputController?.nextMode()
                 text = inputModeLabel()
+                contentDescription = text
                 updateSensitivityVisibility()
+
                 Toast.makeText(
                     this@DesktopActivity,
                     getString(R.string.input_mode_changed, text),
@@ -314,6 +340,11 @@ class DesktopActivity : Activity() {
                 ).show()
             }
         }
+
+        val screenshotButton =
+            controlButton(getString(R.string.desktop_control_screenshot)).apply {
+                setOnClickListener { takeDesktopScreenshot() }
+            }
         sensitivityButton = controlButton(sensitivityButtonLabel()).apply {
             contentDescription = getString(R.string.trackpad_sensitivity)
             setPadding((10 * density).toInt(), 0, (10 * density).toInt(), 0)
@@ -332,21 +363,28 @@ class DesktopActivity : Activity() {
             addView(dragHandle, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, (42 * density).toInt(),
             ))
-            addView(keyboardButton, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, (42 * density).toInt(),
-            ))
             addView(inputModeButton, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, (42 * density).toInt(),
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                (42 * density).toInt(),
+            ))
+            addView(keyboardButton, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                (42 * density).toInt(),
+            ))
+            addView(screenshotButton, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                (42 * density).toInt(),
             ))
             addView(sensitivityButton, LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT, (42 * density).toInt(),
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                (42 * density).toInt(),
             ))
             addView(hideButton, LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT, (42 * density).toInt(),
             ))
         }
 
-        // The sensitivity panel opens below the buttons, so it never covers Keyboard/Trackpad.
+        // El panel de sensibilidad solo pertenece al modo Puntero y no cubre los controles.
         controlOverlay = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.END
@@ -390,7 +428,9 @@ class DesktopActivity : Activity() {
 
         placeholder.addView(controlOverlay, overlayParams)
         placeholder.addView(collapsedControl, collapsedParams)
-        if (!desktopRevealed) controlOverlay?.visibility = View.INVISIBLE
+        controlOverlay?.visibility = View.INVISIBLE
+        collapsedControl?.visibility =
+            if (desktopRevealed) View.VISIBLE else View.INVISIBLE
         dragHandle.setOnTouchListener(dragListener(controlOverlay!!))
         collapsedControl?.setOnTouchListener(dragListener(collapsedControl!!) {
             setControlsCollapsed(false)
@@ -545,6 +585,18 @@ class DesktopActivity : Activity() {
         to?.bringToFront()
     }
 
+    private fun maybeShowKeyboardForTextCursor() {
+        textCursorProbe.probe { isText ->
+            if (!isText) return@probe
+
+            runOnUiThread {
+                if (!isFinishing && !isDestroyed && hasWindowFocus()) {
+                    showKeyboard()
+                }
+            }
+        }
+    }
+
     private fun showKeyboard() {
         val view = lorieView ?: return
         val inputMethod = getSystemService(INPUT_METHOD_SERVICE) as InputMethodManager
@@ -553,6 +605,178 @@ class DesktopActivity : Activity() {
         view.post {
             inputMethod.showSoftInput(view, InputMethodManager.SHOW_IMPLICIT)
         }
+    }
+
+
+    /**
+     * Flujo de teclado tipo PC.
+     *
+     * Print Screen pertenece a DroidDesk.
+     * Las demás teclas físicas se ofrecen primero al motor X11.
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_SYSRQ) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                takeDesktopScreenshot()
+            }
+            return true
+        }
+
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_VOLUME_UP,
+            KeyEvent.KEYCODE_VOLUME_DOWN,
+            KeyEvent.KEYCODE_VOLUME_MUTE,
+            KeyEvent.KEYCODE_POWER,
+            KeyEvent.KEYCODE_CAMERA ->
+                return super.dispatchKeyEvent(event)
+        }
+
+        if (TermuxMainActivity.getInstance().handleKey(event)) {
+            return true
+        }
+
+        return super.dispatchKeyEvent(event)
+    }
+
+    /**
+     * Captura solamente el escritorio X11.
+     * Los controles flotantes Android de DroidDesk no aparecen en la imagen.
+     */
+    private fun takeDesktopScreenshot() {
+        val view = lorieView ?: return
+
+        val width = view.width
+        val height = view.height
+
+        if (width <= 0 || height <= 0) {
+            Toast.makeText(
+                this,
+                R.string.desktop_screenshot_failed,
+                Toast.LENGTH_SHORT,
+            ).show()
+            return
+        }
+
+        val bitmap = Bitmap.createBitmap(
+            width,
+            height,
+            Bitmap.Config.ARGB_8888,
+        )
+
+        PixelCopy.request(
+            view,
+            bitmap,
+            { result ->
+                if (result != PixelCopy.SUCCESS) {
+                    bitmap.recycle()
+                    Log.e(TAG, "PixelCopy failed result=$result")
+                    Toast.makeText(
+                        this,
+                        R.string.desktop_screenshot_failed,
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                    return@request
+                }
+
+                Thread({
+                    val saved = runCatching {
+                        saveDesktopScreenshot(bitmap)
+                    }.onFailure {
+                        Log.e(TAG, "Failed to save desktop screenshot", it)
+                    }.getOrDefault(false)
+
+                    bitmap.recycle()
+
+                    runOnUiThread {
+                        Toast.makeText(
+                            this,
+                            if (saved) {
+                                R.string.desktop_screenshot_saved
+                            } else {
+                                R.string.desktop_screenshot_failed
+                            },
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                }, "DroidDeskScreenshot").start()
+            },
+            Handler(Looper.getMainLooper()),
+        )
+    }
+
+    private fun saveDesktopScreenshot(bitmap: Bitmap): Boolean {
+        val stamp = SimpleDateFormat(
+            "yyyyMMdd-HHmmss",
+            Locale.US,
+        ).format(Date())
+
+        val name = "DroidDesk-$stamp.png"
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                put(
+                    MediaStore.Images.Media.RELATIVE_PATH,
+                    "${Environment.DIRECTORY_PICTURES}/DroidDesk",
+                )
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+
+            val uri = contentResolver.insert(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                values,
+            ) ?: return false
+
+            val written = runCatching {
+                contentResolver.openOutputStream(uri)?.use { stream ->
+                    bitmap.compress(
+                        Bitmap.CompressFormat.PNG,
+                        100,
+                        stream,
+                    )
+                } ?: false
+            }.getOrDefault(false)
+
+            if (!written) {
+                contentResolver.delete(uri, null, null)
+                return false
+            }
+
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            contentResolver.update(uri, values, null, null)
+
+            Log.i(
+                TAG,
+                "Screenshot saved Pictures/DroidDesk/$name",
+            )
+
+            return true
+        }
+
+        val root = getExternalFilesDir(
+            Environment.DIRECTORY_PICTURES
+        ) ?: return false
+
+        val directory = java.io.File(
+            root,
+            "DroidDesk",
+        ).apply {
+            mkdirs()
+        }
+
+        val output = java.io.File(directory, name)
+
+        return runCatching {
+            java.io.FileOutputStream(output).use { stream ->
+                bitmap.compress(
+                    Bitmap.CompressFormat.PNG,
+                    100,
+                    stream,
+                )
+            }
+        }.getOrDefault(false)
     }
 
     private fun startDesktopSessionIfRequested() {
@@ -687,8 +911,13 @@ class DesktopActivity : Activity() {
                 ?.setDuration(350)
                 ?.withEndAction {
                     loadingOverlay?.visibility = View.GONE
-                    controlOverlay?.visibility = View.VISIBLE
-                    controlOverlay?.bringToFront()
+
+                    controlOverlay?.visibility = View.INVISIBLE
+
+                    collapsedControl?.visibility = View.VISIBLE
+
+                    collapsedControl?.bringToFront()
+
                     lorieView?.requestFocus()
                 }
                 ?.start()
@@ -718,6 +947,7 @@ class DesktopActivity : Activity() {
         surfaceCallback?.let { callback -> lorieView?.holder?.removeCallback(callback) }
         surfaceCallback = null
         inputController?.dispose()
+        textCursorProbe.dispose()
         inputController = null
         x11ServiceClient?.disconnect()
         x11ServiceClient = null

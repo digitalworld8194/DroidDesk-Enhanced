@@ -11,7 +11,10 @@ import com.termux.x11.input.TouchInputHandler
 import com.termux.x11.input.TrackpadSensitivity
 
 /** Connects LorieView to the gesture/input implementation imported from Termux:X11. */
-class X11InputController(private val lorieView: LorieView) {
+class X11InputController(
+    private val lorieView: LorieView,
+    private val onPrimaryActivation: (() -> Unit)? = null,
+) {
     private val inputHandler = TouchInputHandler(
         MainActivity.getInstance(),
         InputEventSender(lorieView),
@@ -21,7 +24,8 @@ class X11InputController(private val lorieView: LorieView) {
         .getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     /** Restored from the last session so the button state survives activity and app restarts. */
-    var mode: Int = InputModes.fromStored(modePrefs.getString(KEY_TOUCH_MODE, null))
+    var mode: Int =
+        InputModes.fromStored(modePrefs.getString(KEY_TOUCH_MODE, null))
         private set
 
     /**
@@ -52,7 +56,9 @@ class X11InputController(private val lorieView: LorieView) {
     fun nextMode(): Int {
         val next = InputModes.toggle(mode)
         setMode(next)
-        modePrefs.edit().putString(KEY_TOUCH_MODE, InputModes.toStored(next)).apply()
+        modePrefs.edit()
+            .putString(KEY_TOUCH_MODE, InputModes.toStored(next))
+            .apply()
         return next
     }
 
@@ -90,14 +96,62 @@ class X11InputController(private val lorieView: LorieView) {
         inputHandler.reloadPreferences(prefs)
     }
 
-    private fun handleMotionEvent(view: View, event: MotionEvent): Boolean =
-        inputHandler.handleTouchEvent(lorieView, view, event)
+    private var fingerDownX = 0f
+    private var fingerDownY = 0f
+    private var fingerDownAt = 0L
+
+    private fun handleMotionEvent(view: View, event: MotionEvent): Boolean {
+        val action = event.actionMasked
+        val toolType = event.getToolType(event.actionIndex)
+
+        if (toolType == MotionEvent.TOOL_TYPE_FINGER &&
+            action == MotionEvent.ACTION_DOWN
+        ) {
+            fingerDownX = event.x
+            fingerDownY = event.y
+            fingerDownAt = event.eventTime
+        }
+
+        val handled = inputHandler.handleTouchEvent(lorieView, view, event)
+
+        val fingerTap =
+            toolType == MotionEvent.TOOL_TYPE_FINGER &&
+                action == MotionEvent.ACTION_UP &&
+                event.eventTime - fingerDownAt <= TAP_MAX_DURATION_MS &&
+                kotlin.math.abs(event.x - fingerDownX) <= tapSlopPx &&
+                kotlin.math.abs(event.y - fingerDownY) <= tapSlopPx
+
+        val primaryMouseRelease =
+            toolType == MotionEvent.TOOL_TYPE_MOUSE &&
+                action == MotionEvent.ACTION_BUTTON_RELEASE &&
+                event.actionButton == MotionEvent.BUTTON_PRIMARY
+
+        if (fingerTap || primaryMouseRelease) {
+            /*
+             * Let X11 process the click/touch and update its cursor first.
+             * Hover alone never reaches this path.
+             */
+            lorieView.postDelayed(
+                { onPrimaryActivation?.invoke() },
+                TEXT_CURSOR_SETTLE_MS,
+            )
+        }
+
+        return handled
+    }
+
+    private val tapSlopPx: Float
+        get() = TAP_SLOP_DP * lorieView.resources.displayMetrics.density
 
     companion object {
         const val DISPLAY_SCALE_PERCENT = 200
         private const val PREFS_NAME = "droiddesk_input"
         private const val KEY_TOUCH_MODE = "touch_mode"
         private const val KEY_TRACKPAD_SENSITIVITY = "trackpad_sensitivity"
+
+        private const val TAP_SLOP_DP = 18f
+        private const val TAP_MAX_DURATION_MS = 700L
+        private const val TEXT_CURSOR_SETTLE_MS = 90L
 
         /** Must run before LorieView is measured so Xwayland starts at the scaled resolution. */
         fun configureDisplayScale() {

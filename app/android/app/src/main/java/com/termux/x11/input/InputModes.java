@@ -1,24 +1,32 @@
 package com.termux.x11.input;
 
 /**
- * The two modes offered by DroidDesk's top "Trackpad" button and their persisted form.
- * TRACKPAD behaves like a laptop touchpad; TOUCH is tablet-style direct pointing (upstream
- * SIMULATED_TOUCH: taps click where the finger is, gestures keep right click and scrolling).
+ * DroidDesk hybrid input profiles.
+ *
+ * TOUCH is the default phone/tablet experience and maps to the real
+ * Termux:X11 TOUCH mode, which forwards finger events through sendTouchEvent().
+ *
+ * TRACKPAD is the optional pointer/laptop experience.
+ *
+ * SIMULATED_TOUCH (2) remains an internal Termux:X11 mode and is
+ * deliberately not exposed as a DroidDesk user profile.
  */
 public final class InputModes {
     private InputModes() {}
 
-    // Same values as TouchInputHandler.InputMode.TRACKPAD / SIMULATED_TOUCH.
     public static final int TRACKPAD = 1;
-    public static final int TOUCH = 2;
+    public static final int TOUCH = 3;
 
     public static int toggle(int mode) {
         return mode == TOUCH ? TRACKPAD : TOUCH;
     }
 
-    /** Parses a stored value; anything unknown or missing falls back to TRACKPAD. */
+    /**
+     * Fresh installs and unknown/legacy values fall back to real TOUCH.
+     * Only an explicitly saved TRACKPAD value enables pointer mode.
+     */
     public static int fromStored(String stored) {
-        return String.valueOf(TOUCH).equals(stored) ? TOUCH : TRACKPAD;
+        return String.valueOf(TRACKPAD).equals(stored) ? TRACKPAD : TOUCH;
     }
 
     public static String toStored(int mode) {
