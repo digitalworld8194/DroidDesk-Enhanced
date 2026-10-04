@@ -128,13 +128,25 @@ class MainActivity : FlutterActivity() {
             when {
                 imeVisible && !typing -> window.insetsController?.hide(ime)
                 !imeVisible && !typing -> {
-                    decor.dispatchWindowInsetsAnimationEnd(
+                    // Flutter registers its callback on the FlutterView itself; a
+                    // parent's dispatch mode can keep a decor-level end from it.
+                    val target = findFlutterView(decor) ?: decor
+                    target.dispatchWindowInsetsAnimationEnd(
                         android.view.WindowInsetsAnimation(ime, null, 0L),
                     )
-                    decor.requestApplyInsets()
+                    target.requestApplyInsets()
+                    Log.i(TAG, "IME resync: ended IME animation on ${target.javaClass.simpleName}")
                 }
             }
         }, 1_000L)
+    }
+
+    private fun findFlutterView(view: android.view.View): io.flutter.embedding.android.FlutterView? {
+        if (view is io.flutter.embedding.android.FlutterView) return view
+        if (view is android.view.ViewGroup) {
+            for (i in 0 until view.childCount) findFlutterView(view.getChildAt(i))?.let { return it }
+        }
+        return null
     }
 
     @Suppress("DEPRECATION")
