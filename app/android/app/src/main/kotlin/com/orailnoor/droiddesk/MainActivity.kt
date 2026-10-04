@@ -106,15 +106,26 @@ class MainActivity : FlutterActivity() {
     /**
      * Opening DroidDesk while another app's keyboard is visible hands that
      * keyboard's hide animation to this window, and Flutter can keep its start
-     * inset (the bottom ~45% stays blank). Once the animation is over, if the
-     * keyboard is really hidden, re-dispatch the real insets.
+     * inset (the bottom ~45% stays blank). Once the animation is over:
+     * - if this window still believes the keyboard is shown although no
+     *   DroidDesk text field uses it, hide it here so a complete hide
+     *   animation (ending at 0) runs in this window;
+     * - otherwise re-dispatch the real insets.
      */
     private fun resyncImeInsetsAfterHandoff() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
         val decor = window.decorView
         decor.postDelayed({
             val insets = decor.rootWindowInsets ?: return@postDelayed
-            if (!insets.isVisible(android.view.WindowInsets.Type.ime())) decor.requestApplyInsets()
+            val ime = android.view.WindowInsets.Type.ime()
+            val imm = getSystemService(android.view.inputmethod.InputMethodManager::class.java)
+            val imeVisible = insets.isVisible(ime)
+            val typing = imm?.isAcceptingText == true
+            Log.i(TAG, "IME resync: visible=$imeVisible bottom=${insets.getInsets(ime).bottom} typing=$typing")
+            when {
+                imeVisible && !typing -> window.insetsController?.hide(ime)
+                !imeVisible -> decor.requestApplyInsets()
+            }
         }, 1_000L)
     }
 
