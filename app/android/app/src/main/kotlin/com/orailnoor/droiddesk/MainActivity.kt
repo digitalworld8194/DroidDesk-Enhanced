@@ -93,7 +93,23 @@ class MainActivity : FlutterActivity() {
         if (hasFocus) {
             restoreSystemBars()
             window.decorView.post { restoreSystemBars() }
+            resyncImeInsetsAfterHandoff()
         }
+    }
+
+    /**
+     * Opening DroidDesk while another app's keyboard is visible hands that
+     * keyboard's hide animation to this window, and Flutter can keep its start
+     * inset (the bottom ~45% stays blank). Once the animation is over, if the
+     * keyboard is really hidden, re-dispatch the real insets.
+     */
+    private fun resyncImeInsetsAfterHandoff() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
+        val decor = window.decorView
+        decor.postDelayed({
+            val insets = decor.rootWindowInsets ?: return@postDelayed
+            if (!insets.isVisible(android.view.WindowInsets.Type.ime())) decor.requestApplyInsets()
+        }, 1_000L)
     }
 
     @Suppress("DEPRECATION")
