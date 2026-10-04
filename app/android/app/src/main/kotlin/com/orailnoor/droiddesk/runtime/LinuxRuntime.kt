@@ -2366,7 +2366,9 @@ class LinuxRuntime(private val context: Context) {
         check("python3 (XFCE app launchers)", File(binDir, "python3").canExecute())
         check("xclip (clipboard)", File(binDir, "xclip").canExecute())
         val shared = File("/storage/emulated/0")
-        check("Android shared storage", shared.isDirectory && shared.canRead(), shared.absolutePath)
+        val sharedReadable = shared.isDirectory && shared.canRead()
+        check("Android shared storage", sharedReadable, if (sharedReadable) shared.absolutePath else
+            "${shared.absolutePath} not readable: allow DroidDesk's Files/Storage permission in Android settings")
         val desktop = desktopState()
         check("desktop session", true, when {
             desktop.active -> "active (" + desktop.components.keys.joinToString() + ", DISPLAY=:0)"

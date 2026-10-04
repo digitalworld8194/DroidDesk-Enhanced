@@ -3,7 +3,9 @@ package com.orailnoor.droiddesk
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.app.role.RoleManager
 import android.os.Bundle
 import android.os.Build
@@ -28,6 +30,7 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         private const val CHANNEL = "com.droiddesk/core"
+        private const val REQUEST_SHARED_STORAGE = 4100
         private const val TAG = "MainActivity"
         // Shared with the Termux control bridge so package transactions never overlap.
         private val packageOperationRunning = LinuxRuntime.packageOperationRunning
@@ -60,6 +63,24 @@ class MainActivity : FlutterActivity() {
     override fun onResume() {
         super.onResume()
         restoreSystemBars()
+        requestSharedStorageOnce()
+    }
+
+    /**
+     * Debian binds /storage/emulated/0 at /mnt/phone, which needs the legacy
+     * storage permission (targetSdk 28). Ask once; afterwards the user decides
+     * in Android settings, so the HOME screen never nags.
+     */
+    private fun requestSharedStorageOnce() {
+        val permissions = arrayOf(
+            Manifest.permission.READ_EXTERNAL_STORAGE,
+            Manifest.permission.WRITE_EXTERNAL_STORAGE,
+        )
+        if (permissions.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) return
+        val prefs = getSharedPreferences("droiddesk_permissions", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("shared_storage_requested", false)) return
+        prefs.edit().putBoolean("shared_storage_requested", true).apply()
+        requestPermissions(permissions, REQUEST_SHARED_STORAGE)
     }
 
     override fun onDestroy() {
